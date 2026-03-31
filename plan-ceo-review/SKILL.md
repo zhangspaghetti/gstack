@@ -682,8 +682,8 @@ eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)"
 DESIGN=$(ls -t "$PROJECT_DATA_DIR"/designs/*-$BRANCH-design-*.md 2>/dev/null | head -1)
 [ -z "$DESIGN" ] && DESIGN=$(ls -t "$PROJECT_DATA_DIR"/designs/*-design-*.md 2>/dev/null | head -1)
 # Fallback: legacy global path
-[ -z "$DESIGN" ] && DESIGN=$(ls -t "$PROJECT_DATA_DIR"/*-$BRANCH-design-*.md 2>/dev/null | head -1)
-[ -z "$DESIGN" ] && DESIGN=$(ls -t "$PROJECT_DATA_DIR"/*-design-*.md 2>/dev/null | head -1)
+[ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-$BRANCH-design-*.md 2>/dev/null | head -1)
+[ -z "$DESIGN" ] && DESIGN=$(ls -t ~/.gstack/projects/$SLUG/*-design-*.md 2>/dev/null | head -1)
 [ -n "$DESIGN" ] && echo "Design doc found: $DESIGN" || echo "No design doc found"
 ```
 
