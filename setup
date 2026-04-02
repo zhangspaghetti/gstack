@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# gstack setup — build browser binary + register skills with Claude Code / Codex
+# gstack setup — build browser binary + register skills with Claude Code / Codex / Copilot
 set -e
 
 if ! command -v bun >/dev/null 2>&1; then
@@ -19,6 +19,8 @@ INSTALL_SKILLS_DIR="$(dirname "$INSTALL_GSTACK_DIR")"
 BROWSE_BIN="$SOURCE_GSTACK_DIR/browse/dist/browse"
 CODEX_SKILLS="$HOME/.codex/skills"
 CODEX_GSTACK="$CODEX_SKILLS/gstack"
+COPILOT_SKILLS="$HOME/.copilot/skills"
+COPILOT_GSTACK="$COPILOT_SKILLS/gstack"
 FACTORY_SKILLS="$HOME/.factory/skills"
 FACTORY_GSTACK="$FACTORY_SKILLS/gstack"
 
@@ -34,7 +36,7 @@ SKILL_PREFIX=1
 SKILL_PREFIX_FLAG=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --host) [ -z "$2" ] && echo "Missing value for --host (expected claude, codex, kiro, or auto)" >&2 && exit 1; HOST="$2"; shift 2 ;;
+    --host) [ -z "$2" ] && echo "Missing value for --host (expected claude, codex, copilot, kiro, or auto)" >&2 && exit 1; HOST="$2"; shift 2 ;;
     --host=*) HOST="${1#--host=}"; shift ;;
     --local) LOCAL_INSTALL=1; shift ;;
     --prefix)    SKILL_PREFIX=1; SKILL_PREFIX_FLAG=1; shift ;;
@@ -44,8 +46,8 @@ while [ $# -gt 0 ]; do
 done
 
 case "$HOST" in
-  claude|codex|kiro|factory|auto) ;;
-  *) echo "Unknown --host value: $HOST (expected claude, codex, kiro, factory, or auto)" >&2; exit 1 ;;
+  claude|codex|copilot|kiro|factory|auto) ;;
+  *) echo "Unknown --host value: $HOST (expected claude, codex, copilot, kiro, factory, or auto)" >&2; exit 1 ;;
 esac
 
 # ─── Resolve skill prefix preference ─────────────────────────
@@ -102,21 +104,25 @@ fi
 # For auto: detect which agents are installed
 INSTALL_CLAUDE=0
 INSTALL_CODEX=0
+INSTALL_COPILOT=0
 INSTALL_KIRO=0
 INSTALL_FACTORY=0
 if [ "$HOST" = "auto" ]; then
   command -v claude >/dev/null 2>&1 && INSTALL_CLAUDE=1
   command -v codex >/dev/null 2>&1 && INSTALL_CODEX=1
+  command -v copilot >/dev/null 2>&1 && INSTALL_COPILOT=1
   command -v kiro-cli >/dev/null 2>&1 && INSTALL_KIRO=1
   command -v droid >/dev/null 2>&1 && INSTALL_FACTORY=1
   # If none found, default to claude
-  if [ "$INSTALL_CLAUDE" -eq 0 ] && [ "$INSTALL_CODEX" -eq 0 ] && [ "$INSTALL_KIRO" -eq 0 ] && [ "$INSTALL_FACTORY" -eq 0 ]; then
+  if [ "$INSTALL_CLAUDE" -eq 0 ] && [ "$INSTALL_CODEX" -eq 0 ] && [ "$INSTALL_COPILOT" -eq 0 ] && [ "$INSTALL_KIRO" -eq 0 ] && [ "$INSTALL_FACTORY" -eq 0 ]; then
     INSTALL_CLAUDE=1
   fi
 elif [ "$HOST" = "claude" ]; then
   INSTALL_CLAUDE=1
 elif [ "$HOST" = "codex" ]; then
   INSTALL_CODEX=1
+elif [ "$HOST" = "copilot" ]; then
+  INSTALL_COPILOT=1
 elif [ "$HOST" = "kiro" ]; then
   INSTALL_KIRO=1
 elif [ "$HOST" = "factory" ]; then
@@ -196,11 +202,12 @@ if [ ! -x "$BROWSE_BIN" ]; then
   exit 1
 fi
 
-# 1b. Generate .agents/ Codex skill docs — always regenerate to prevent stale descriptions.
+# 1b. Generate .agents/ skill docs — always regenerate to prevent stale descriptions.
 # .agents/ is no longer committed — generated at setup time from .tmpl templates.
 # bun run build already does this, but we need it when NEEDS_BUILD=0 (binary is fresh).
 # Always regenerate: generation is fast (<2s) and mtime-based staleness checks are fragile
 # (miss stale files when timestamps match after clone/checkout/upgrade).
+# Codex, Copilot, and other .agents/ hosts share .agents/skills/ — generate once with --host codex.
 AGENTS_DIR="$SOURCE_GSTACK_DIR/.agents/skills"
 NEEDS_AGENTS_GEN=1
 
@@ -661,7 +668,56 @@ if [ "$INSTALL_KIRO" -eq 1 ]; then
   fi
 fi
 
-# 6b. Install for Factory Droid
+# 7. Install for GitHub Copilot (copy from .agents/skills, rewrite paths)
+if [ "$INSTALL_COPILOT" -eq 1 ]; then
+  AGENTS_DIR="$SOURCE_GSTACK_DIR/.agents/skills"
+  mkdir -p "$COPILOT_SKILLS"
+
+  # Create gstack dir with symlinks for runtime assets, copy+sed for SKILL.md
+  [ -L "$COPILOT_GSTACK" ] && rm -f "$COPILOT_GSTACK"
+  mkdir -p "$COPILOT_GSTACK" "$COPILOT_GSTACK/browse" "$COPILOT_GSTACK/gstack-upgrade" "$COPILOT_GSTACK/review"
+  ln -snf "$SOURCE_GSTACK_DIR/bin" "$COPILOT_GSTACK/bin"
+  ln -snf "$SOURCE_GSTACK_DIR/browse/dist" "$COPILOT_GSTACK/browse/dist"
+  ln -snf "$SOURCE_GSTACK_DIR/browse/bin" "$COPILOT_GSTACK/browse/bin"
+  if [ -f "$SOURCE_GSTACK_DIR/ETHOS.md" ]; then
+    ln -snf "$SOURCE_GSTACK_DIR/ETHOS.md" "$COPILOT_GSTACK/ETHOS.md"
+  fi
+  if [ -f "$AGENTS_DIR/gstack-upgrade/SKILL.md" ]; then
+    ln -snf "$AGENTS_DIR/gstack-upgrade/SKILL.md" "$COPILOT_GSTACK/gstack-upgrade/SKILL.md"
+  fi
+  for f in checklist.md design-checklist.md greptile-triage.md TODOS-format.md; do
+    if [ -f "$SOURCE_GSTACK_DIR/review/$f" ]; then
+      ln -snf "$SOURCE_GSTACK_DIR/review/$f" "$COPILOT_GSTACK/review/$f"
+    fi
+  done
+
+  # Rewrite root SKILL.md paths for Copilot
+  sed -e "s|~/.claude/skills/gstack|~/.copilot/skills/gstack|g" \
+      -e "s|\.claude/skills/gstack|.copilot/skills/gstack|g" \
+      -e "s|\.claude/skills|.copilot/skills|g" \
+      "$SOURCE_GSTACK_DIR/SKILL.md" > "$COPILOT_GSTACK/SKILL.md"
+
+  if [ ! -d "$AGENTS_DIR" ]; then
+    echo "  warning: no .agents/skills/ directory found — run 'bun run build' first" >&2
+  else
+    for skill_dir in "$AGENTS_DIR"/gstack*/; do
+      [ -f "$skill_dir/SKILL.md" ] || continue
+      skill_name="$(basename "$skill_dir")"
+      target_dir="$COPILOT_SKILLS/$skill_name"
+      mkdir -p "$target_dir"
+      sed -e 's|\$HOME/.codex/skills/gstack|$HOME/.copilot/skills/gstack|g' \
+          -e "s|~/.codex/skills/gstack|~/.copilot/skills/gstack|g" \
+          -e "s|~/.claude/skills/gstack|~/.copilot/skills/gstack|g" \
+          "$skill_dir/SKILL.md" > "$target_dir/SKILL.md"
+    done
+    echo "gstack ready (copilot)."
+    echo "  browse: $BROWSE_BIN"
+    echo "  copilot skills: $COPILOT_SKILLS"
+    echo "  VS Code: enable 'chat.useAgentSkills' in settings to activate skills"
+  fi
+fi
+
+# 7b. Install for Factory Droid
 if [ "$INSTALL_FACTORY" -eq 1 ]; then
   mkdir -p "$FACTORY_SKILLS"
   create_factory_runtime_root "$SOURCE_GSTACK_DIR" "$FACTORY_GSTACK"
@@ -671,14 +727,14 @@ if [ "$INSTALL_FACTORY" -eq 1 ]; then
   echo "  factory skills: $FACTORY_SKILLS"
 fi
 
-# 7. Create .agents/ sidecar symlinks for the real Codex skill target.
-# The root Codex skill ends up pointing at $SOURCE_GSTACK_DIR/.agents/skills/gstack,
+# 8. Create .agents/ sidecar symlinks for Codex and Copilot skill targets.
+# The root skill ends up pointing at $SOURCE_GSTACK_DIR/.agents/skills/gstack,
 # so the runtime assets must live there for both global and repo-local installs.
-if [ "$INSTALL_CODEX" -eq 1 ]; then
+if [ "$INSTALL_CODEX" -eq 1 ] || [ "$INSTALL_COPILOT" -eq 1 ]; then
   create_agents_sidecar "$SOURCE_GSTACK_DIR"
 fi
 
-# 8. First-time welcome + legacy cleanup
+# 9. First-time welcome + legacy cleanup
 if [ ! -f "$HOME/.gstack/.welcome-seen" ]; then
   echo "  Welcome! Run /gstack-upgrade anytime to stay current."
   touch "$HOME/.gstack/.welcome-seen"

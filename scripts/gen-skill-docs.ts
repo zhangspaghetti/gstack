@@ -31,10 +31,11 @@ const HOST_ARG_VAL: HostArg = (() => {
   if (!HOST_ARG) return 'claude';
   const val = HOST_ARG.includes('=') ? HOST_ARG.split('=')[1] : process.argv[process.argv.indexOf(HOST_ARG) + 1];
   if (val === 'codex' || val === 'agents') return 'codex';
+  if (val === 'copilot') return 'copilot';
   if (val === 'factory' || val === 'droid') return 'factory';
   if (val === 'claude') return 'claude';
   if (val === 'all') return 'all';
-  throw new Error(`Unknown host: ${val}. Use claude, codex, factory, droid, agents, or all.`);
+  throw new Error(`Unknown host: ${val}. Use claude, codex, copilot, factory, droid, agents, or all.`);
 })();
 
 // For single-host mode, HOST is the host. For --host all, it's set per iteration below.
@@ -175,7 +176,7 @@ function transformFrontmatter(content: string, host: Host): string {
   const body = content.slice(fmEnd + 4); // includes the leading \n after ---
   const { name, description } = extractNameAndDescription(content);
 
-  if (host === 'codex') {
+  if (host === 'codex' || host === 'copilot') {
     // Codex 1024-char description limit — fail build, don't ship broken skills
     const MAX_DESC = 1024;
     if (description.length > MAX_DESC) {
@@ -241,6 +242,7 @@ interface ExternalHostConfig {
 
 const EXTERNAL_HOST_CONFIG: Record<string, ExternalHostConfig> = {
   codex:   { hostSubdir: '.agents',  generateMetadata: true,  descriptionLimit: 1024 },
+  copilot: { hostSubdir: '.agents',  generateMetadata: true,  descriptionLimit: 1024 },
   factory: { hostSubdir: '.factory', generateMetadata: false },
 };
 
@@ -395,7 +397,7 @@ function findTemplates(): string[] {
   return discoverTemplates(ROOT).map(t => path.join(ROOT, t.tmpl));
 }
 
-const ALL_HOSTS: Host[] = ['claude', 'codex', 'factory'];
+const ALL_HOSTS: Host[] = ['claude', 'codex', 'copilot', 'factory'];
 const hostsToRun: Host[] = HOST_ARG_VAL === 'all' ? ALL_HOSTS : [HOST];
 const failures: { host: string; error: Error }[] = [];
 
