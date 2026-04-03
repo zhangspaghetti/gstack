@@ -1,0 +1,351 @@
+---
+name: work
+preamble-tier: 4
+version: 1.0.0
+description: |
+  Plan-to-implementation orchestrator. Reads plan artifacts from /plan-ceo-review,
+  /plan-eng-review, and /plan-design-review, decomposes into tasks, and implements
+  with automatic mode selection (single-agent or parallel worktrees). Use when asked
+  to "implement the plan", "build this", "start working", "implement", or after plan
+  review is complete. Proactively suggest after /plan-eng-review or /autoplan completes. (gstack)
+allowed-tools:
+  - Bash
+  - Read
+  - Write
+  - Edit
+  - Grep
+  - Glob
+  - Agent
+  - AskUserQuestion
+  - WebSearch
+---
+
+{{PREAMBLE}}
+
+{{BASE_BRANCH_DETECT}}
+
+# Work: Plan-to-Implementation Orchestrator
+
+You are running the `/work` workflow. This skill reads approved plan artifacts and
+implements them. It bridges the gap between plan review and shipping.
+
+```
+/plan-ceo-review  ─┐
+/plan-eng-review  ─┼──▶  /work  ──▶  /review  ──▶  /qa  ──▶  /ship
+/plan-design-review┘
+```
+
+**Trust the plan.** /work executes. It does not re-review scope. Scope debates belong
+in the review phase. If the plan says build X, build X.
+
+---
+
+## Step 0: Gather Plan Artifacts
+
+Collect all available plan artifacts for the current branch.
+
+```bash
+setopt +o nomatch 2>/dev/null || true
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)" 2>/dev/null || true
+SLUG=${SLUG:-unknown}
+BRANCH=$(git rev-parse --abbrev-ref HEAD 2>/dev/null | tr '/' '-' || echo 'no-branch')
+PROJECT_DIR="${GSTACK_HOME:-$HOME/.gstack}/projects/$SLUG"
+
+echo "=== Plan Artifacts ==="
+
+# CEO plan
+CEO_PLAN=$(ls -t "$PROJECT_DIR"/*-$BRANCH-ceo-plan-*.md 2>/dev/null | head -1)
+[ -z "$CEO_PLAN" ] && CEO_PLAN=$(ls -t "$PROJECT_DIR"/*-ceo-plan-*.md 2>/dev/null | head -1)
+[ -n "$CEO_PLAN" ] && echo "CEO plan: $CEO_PLAN" || echo "CEO plan: not found"
+
+# Eng review test plan
+TEST_PLAN=$(ls -t "$PROJECT_DIR"/*-$BRANCH-eng-review-test-plan-*.md 2>/dev/null | head -1)
+[ -z "$TEST_PLAN" ] && TEST_PLAN=$(ls -t "$PROJECT_DIR"/*-$BRANCH-test-plan-*.md 2>/dev/null | head -1)
+[ -z "$TEST_PLAN" ] && TEST_PLAN=$(ls -t "$PROJECT_DIR"/*-test-plan-*.md 2>/dev/null | head -1)
+[ -n "$TEST_PLAN" ] && echo "Test plan: $TEST_PLAN" || echo "Test plan: not found"
+
+# Design doc
+DESIGN=$(ls -t "$PROJECT_DIR"/*-$BRANCH-design-*.md 2>/dev/null | head -1)
+[ -z "$DESIGN" ] && DESIGN=$(ls -t "$PROJECT_DIR"/*-design-*.md 2>/dev/null | head -1)
+[ -n "$DESIGN" ] && echo "Design doc: $DESIGN" || echo "Design doc: not found"
+
+# Review log (for eng review architecture decisions)
+REVIEW_LOG="$PROJECT_DIR/$BRANCH-reviews.jsonl"
+[ -f "$REVIEW_LOG" ] && echo "Review log: $REVIEW_LOG" || echo "Review log: not found"
+```
+
+Read every artifact that was found. These are your implementation instructions.
+
+**If no artifacts are found at all:** Use AskUserQuestion:
+
+> "No plan artifacts found for branch `$BRANCH`. /work needs a plan to implement.
+> You can create one with /office-hours (design doc) or /plan-eng-review (architecture)."
+
+Options:
+- A) Run /office-hours to create a design doc first
+- B) Describe what to build (I'll work from your description instead)
+
+If B: proceed with the user's description as the plan. Skip Step 1's plan-based
+decomposition and ask the user to describe the tasks directly.
+
+---
+
+## Step 1: Decompose into Tasks
+
+Read the plan artifacts and break the work into discrete, implementable tasks.
+
+### Task Decomposition Rules
+
+1. **One task = one file or one cohesive feature.** A task that touches 5+ files is too big.
+   Split it. A task that changes one line is too small. Merge it with related work.
+
+2. **Upper limit: 15 tasks.** If the plan decomposes into more than 15 tasks, it's too
+   large for a single /work session. Tell the user: "This plan has N tasks. Consider
+   splitting into phases and running /work on each phase."
+
+3. **Same directory = same lane.** Tasks that modify files in the same directory should
+   be assigned to the same agent (or run sequentially) to avoid merge conflicts.
+
+4. **Dependencies are explicit.** If Task B needs Task A's output (e.g., B imports a
+   function that A creates), mark the dependency. Dependent tasks run sequentially.
+
+5. **Tests are part of the task, not separate.** Each task includes writing tests for the
+   code it produces. Do not create separate "write tests" tasks.
+
+### Output Format
+
+Produce a task table:
+
+```
+TASK DECOMPOSITION
+═══════════════════
+| # | Task | Files/Modules | Depends on | Lane |
+|---|------|--------------|------------|------|
+| 1 | ... | src/auth/ | — | A |
+| 2 | ... | src/api/ | — | B |
+| 3 | ... | src/auth/ | 1 | A |
+| 4 | ... | test/ | 1, 2 | C |
+```
+
+**Lane assignment:** Tasks in the same directory go in the same lane. Independent lanes
+can run in parallel.
+
+---
+
+## Step 2: Select Execution Mode
+
+Count the tasks and parallel lanes from Step 1.
+
+### Standard Mode (default)
+
+Use when: fewer than 5 tasks, OR only 1 lane, OR all tasks are sequential.
+
+**How it works — the Ralph Loop:**
+
+For each task in dependency order:
+1. **Pick** the next unblocked task
+2. **Implement** the code change
+3. **Test** — run the project's test suite (detect from CLAUDE.md, package.json, Makefile, pytest.ini, etc.)
+4. **Commit** — if tests pass, commit with a descriptive message
+5. **Continue** — pick the next task
+
+If tests fail: fix the issue before moving to the next task. Do not skip failing tests.
+
+### Parallel Mode
+
+Use when: 5+ tasks AND 2+ independent lanes.
+
+**How it works:**
+
+1. **Spawn implementation agents** — one per independent lane, using the Agent tool
+   with `isolation: "worktree"`. Each agent gets its own git worktree, so file conflicts
+   are impossible.
+
+2. **Spawn a reviewer agent** — a separate read-only agent that reviews each completed
+   task's diff. The reviewer checks:
+   - Does the code match the plan?
+   - Are tests included and passing?
+   - Any obvious issues (security, performance, style)?
+
+3. **Execute lanes in parallel** — launch all independent lanes simultaneously.
+   Sequential tasks within a lane run in order.
+
+4. **Merge worktrees** — after all lanes complete, merge each agent's branch back.
+   If merge conflicts occur, resolve them or ask the user.
+
+**Agent prompt template for implementation agents:**
+
+Each spawned agent receives:
+
+```
+You are implementing one lane of a larger plan. Your job is to complete
+the tasks assigned to you, write tests, and commit your work.
+
+TASKS:
+{task list for this lane}
+
+CODE STANDARDS:
+- Every line of code is a liability. Less is more.
+- Explicit over clever. Code should be obviously correct.
+- Do NOT create abstractions for testability alone.
+- Do NOT create interfaces with one implementation.
+- Do NOT add defensive code for impossible internal states.
+- Validate at boundaries, trust internal data.
+- Match existing code style. Read neighboring files before writing.
+
+{Include relevant CLAUDE.md conventions if CLAUDE.md exists}
+
+For each task:
+1. Implement the change
+2. Write tests
+3. Run the test suite: {test command}
+4. If tests pass, commit: git add {files} && git commit -m "{message}"
+5. Move to the next task
+```
+
+**Agent prompt for the reviewer:**
+
+```
+You are a code reviewer. For each diff you receive, check:
+1. Does it match the plan's requirements?
+2. Are tests present and meaningful (not just smoke tests)?
+3. Any security issues, N+1 queries, or missing error handling?
+4. Does it follow existing code conventions?
+
+Be terse. Flag only real issues. Do not nitpick style unless it
+contradicts the project's existing patterns.
+```
+
+---
+
+## Step 3: Execute
+
+### Standard Mode
+
+Run the Ralph Loop as described above. For each task:
+- Announce: "Working on Task N: {description}"
+- Implement, test, commit
+- Announce: "Task N complete. {summary of changes}"
+
+### Parallel Mode
+
+1. **Detect test command:**
+
+```bash
+# Auto-detect test command
+if [ -f CLAUDE.md ] && grep -q "test" CLAUDE.md 2>/dev/null; then
+  echo "Check CLAUDE.md for test command"
+elif [ -f package.json ]; then
+  echo "TEST_CMD: npm test (or bun test)"
+elif [ -f Makefile ] && grep -q "^test:" Makefile 2>/dev/null; then
+  echo "TEST_CMD: make test"
+elif [ -f pytest.ini ] || [ -f pyproject.toml ]; then
+  echo "TEST_CMD: pytest"
+elif [ -f Cargo.toml ]; then
+  echo "TEST_CMD: cargo test"
+elif [ -f go.mod ]; then
+  echo "TEST_CMD: go test ./..."
+else
+  echo "TEST_CMD: not detected — ask user"
+fi
+```
+
+2. **Launch lane agents** in parallel using the Agent tool with `isolation: "worktree"`.
+
+3. **Launch reviewer agent** (read-only, no worktree needed).
+
+4. **Wait for all agents to complete.** Track progress:
+   - Check each agent's status
+   - If an agent appears stuck (no progress for 5+ minutes), check on it
+
+5. **Merge results:**
+
+```bash
+# For each completed worktree branch
+git merge --no-ff {agent-branch} -m "Merge lane {X}: {summary}"
+```
+
+If merge conflicts occur: attempt auto-resolution. If that fails, present the
+conflict to the user with context from both lanes.
+
+6. **Run full test suite** after all merges to catch integration issues.
+
+---
+
+## Step 4: Verify
+
+After all tasks are complete (both modes):
+
+1. **Run the full test suite** one final time.
+2. **Check plan conformance:** Compare completed work against the plan artifacts.
+   For each plan requirement, verify it was implemented.
+3. **Output a summary:**
+
+```
+BUILD SUMMARY
+═════════════
+Mode: Standard | Parallel ({N} lanes, {M} agents)
+Tasks: {completed}/{total}
+Commits: {N}
+Test status: passing | {N} failures
+Plan conformance: {N}/{M} requirements met
+
+Files changed:
+  {file list with +/- line counts}
+```
+
+---
+
+## Step 5: Log Build Result
+
+Persist the build result so `/ship`'s Review Dashboard can see that implementation ran.
+
+```bash
+eval "$(~/.claude/skills/gstack/bin/gstack-slug 2>/dev/null)" 2>/dev/null || true
+mkdir -p "${GSTACK_HOME:-$HOME/.gstack}/projects/${SLUG:-unknown}"
+```
+
+```bash
+~/.claude/skills/gstack/bin/gstack-review-log '{"skill":"work","timestamp":"'"$(date -u +%Y-%m-%dT%H:%M:%SZ)"'","status":"STATUS","tasks_completed":N,"tasks_total":N,"mode":"MODE","commit":"'"$(git rev-parse --short HEAD)"'"}'
+```
+
+Replace STATUS with "clean" if all tasks completed and tests pass, "issues_open" otherwise.
+Replace MODE with "standard" or "parallel".
+
+---
+
+## Step 6: Next Steps
+
+After logging, suggest the next workflow step:
+
+> "Implementation complete. {N} tasks done, tests passing.
+> Next steps:
+> - `/review` — pre-landing code review (recommended)
+> - `/qa` — QA testing if this has UI changes
+> - `/ship` — ship when ready"
+
+If tests are failing, say so plainly: "Implementation complete but {N} tests are failing.
+Fix them before shipping."
+
+---
+
+## Edge Cases
+
+### Plan artifact is stale
+If the plan artifact's timestamp is more than 7 days old, warn:
+"Plan artifact is from {date} ({N} days ago). The codebase may have changed.
+Consider re-running /plan-eng-review to verify the plan is still valid."
+
+### User has uncommitted changes
+If `git status` shows uncommitted changes before starting, ask:
+"You have uncommitted changes. Should I commit them first, or stash them?"
+
+### No test command detected
+If no test framework is found, ask the user:
+"No test framework detected. What command runs your tests?"
+If the user says there are no tests, proceed without testing but warn:
+"Proceeding without tests. Strongly recommend adding tests before shipping."
+
+### Single-file plan
+If the plan only touches one file, always use Standard mode regardless of
+task count. Parallel mode adds overhead with no benefit for single-file changes.
