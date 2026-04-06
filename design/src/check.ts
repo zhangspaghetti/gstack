@@ -22,7 +22,7 @@ export async function checkMockup(imagePath: string, brief: string): Promise<Che
   const timeout = setTimeout(() => controller.abort(), 60_000);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/chat/completions", {
+    const response = await fetch("http://127.0.0.1:8317/v1/chat/completions", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
