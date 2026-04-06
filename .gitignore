@@ -17,6 +17,7 @@ bin/gstack-global-discover
 .openclaw/
 .hermes/
 .gbrain/
+.copilot/
 .context/
 extension/.auth.json
 .gstack-worktrees/

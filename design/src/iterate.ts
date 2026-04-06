@@ -85,7 +85,7 @@ async function callWithThreading(
   const timeout = setTimeout(() => controller.abort(), 120_000);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch("http://127.0.0.1:8317/v1/responses", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
@@ -133,7 +133,7 @@ async function callFresh(
   const timeout = setTimeout(() => controller.abort(), 120_000);
 
   try {
-    const response = await fetch("https://api.openai.com/v1/responses", {
+    const response = await fetch("http://127.0.0.1:8317/v1/responses", {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
