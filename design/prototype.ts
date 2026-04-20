@@ -3,17 +3,17 @@
  * Sends 3 design briefs to GPT Image API via Responses API.
  * Validates: text rendering quality, layout accuracy, visual coherence.
  *
- * Run: OPENAI_API_KEY=$(cat ~/.gstack/openai.json | python3 -c "import sys,json;print(json.load(sys.stdin)['api_key'])") bun run design/prototype.ts
+ * Run: GSTACK_OPENAI_API_KEY=$(cat ~/.gstack/openai.json | python3 -c "import sys,json;print(json.load(sys.stdin)['api_key'])") bun run design/prototype.ts
  */
 
 import fs from "fs";
 import path from "path";
 
-const API_KEY = process.env.OPENAI_API_KEY
+const API_KEY = process.env.GSTACK_OPENAI_API_KEY
   || JSON.parse(fs.readFileSync(path.join(process.env.HOME!, ".gstack/openai.json"), "utf-8")).api_key;
 
 if (!API_KEY) {
-  console.error("No API key found. Set OPENAI_API_KEY or save to ~/.gstack/openai.json");
+  console.error("No API key found. Set GSTACK_OPENAI_API_KEY or save to ~/.gstack/openai.json");
   process.exit(1);
 }
 
@@ -45,7 +45,7 @@ async function generateMockup(brief: { name: string; prompt: string }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000); // 2 min timeout
 
-  const response = await fetch(`${process.env.OPENAI_HOST ?? "https://api.openai.com"}/v1/responses`, {
+  const response = await fetch(`${process.env.GSTACK_OPENAI_HOST ?? "https://api.openai.com"}/v1/responses`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${API_KEY}`,

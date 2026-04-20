@@ -402,7 +402,7 @@ const check = await openai.chat.completions.create({
 
 **Auth resolution order:**
 1. Read `~/.gstack/openai.json` → `{ "api_key": "sk-..." }` (file permissions 0600)
-2. Fall back to `OPENAI_API_KEY` environment variable
+2. Fall back to `GSTACK_OPENAI_API_KEY` environment variable
 3. If neither exists → guided setup flow:
    - Tell user: "Design mockups need an OpenAI API key with image generation permissions. Get one at platform.openai.com/api-keys"
    - Prompt user to paste the key

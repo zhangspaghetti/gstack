@@ -7,7 +7,7 @@
  *
  * Prerequisites:
  * - `codex` binary installed (npm install -g @openai/codex)
- * - Codex authenticated via ~/.codex/ config (no OPENAI_API_KEY env var needed)
+ * - Codex authenticated via ~/.codex/ config (no GSTACK_OPENAI_API_KEY env var needed)
  * - EVALS=1 env var set (same gate as Claude E2E tests)
  *
  * Skips gracefully when prerequisites are not met.
@@ -38,7 +38,7 @@ const CODEX_AVAILABLE = (() => {
 const evalsEnabled = !!process.env.EVALS;
 
 // Skip all tests if codex is not available or EVALS is not set.
-// Note: Codex uses its own auth from ~/.codex/ config — no OPENAI_API_KEY env var needed.
+// Note: Codex uses its own auth from ~/.codex/ config — no GSTACK_OPENAI_API_KEY env var needed.
 const SKIP = !CODEX_AVAILABLE || !evalsEnabled;
 
 const describeCodex = SKIP ? describe.skip : describe;

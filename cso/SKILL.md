@@ -1076,7 +1076,7 @@ ls -la .claude/skills/ 2>/dev/null
 
 Use Grep to search all local skill SKILL.md files for suspicious patterns:
 - `curl`, `wget`, `fetch`, `http`, `exfiltrat` (network exfiltration)
-- `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `env.`, `process.env` (credential access)
+- `ANTHROPIC_API_KEY`, `GSTACK_OPENAI_API_KEY`, `env.`, `process.env` (credential access)
 - `IGNORE PREVIOUS`, `system override`, `disregard`, `forget your instructions` (prompt injection)
 
 **Tier 2 — global skills (requires permission):** Before scanning globally installed skills or user settings, use AskUserQuestion:

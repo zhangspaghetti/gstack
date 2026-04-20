@@ -7,7 +7,7 @@
  *
  * Flow:
  *   1. Parse command + flags from argv
- *   2. Resolve auth (~/. gstack/openai.json → OPENAI_API_KEY → guided setup)
+ *   2. Resolve auth (~/. gstack/openai.json → GSTACK_OPENAI_API_KEY → guided setup)
  *   3. Execute command (API call → write PNG/HTML)
  *   4. Print result JSON to stdout
  */
@@ -60,7 +60,7 @@ function printUsage(): void {
     console.log(`  ${name.padEnd(12)} ${info.description}`);
     console.log(`  ${"".padEnd(12)} ${info.usage}`);
   }
-  console.log("\nAuth: ~/.gstack/openai.json or OPENAI_API_KEY env var");
+  console.log("\nAuth: ~/.gstack/openai.json or GSTACK_OPENAI_API_KEY env var");
   console.log("Setup: $D setup");
 }
 

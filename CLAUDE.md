@@ -25,7 +25,7 @@ bun run slop:diff     # slop findings in files changed on this branch only
 ```
 
 `test:evals` requires `ANTHROPIC_API_KEY`. Codex E2E tests (`test/codex-e2e.test.ts`)
-use Codex's own auth from `~/.codex/` config — no `OPENAI_API_KEY` env var needed.
+use Codex's own auth from `~/.codex/` config — no `GSTACK_OPENAI_API_KEY` env var needed.
 E2E tests stream progress in real-time (tool-by-tool via `--output-format stream-json
 --verbose`). Results are persisted to `~/.gstack-dev/evals/` with auto-comparison
 against the previous run.

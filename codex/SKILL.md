@@ -884,12 +884,12 @@ _gstack_codex_version_check   # warns if known-bad, non-blocking
 ```
 
 If the output contains `AUTH_FAILED`, stop and tell the user:
-"No Codex authentication found. Run `codex login` or set `$CODEX_API_KEY` / `$OPENAI_API_KEY`, then re-run this skill."
+"No Codex authentication found. Run `codex login` or set `$CODEX_API_KEY` / `$GSTACK_OPENAI_API_KEY`, then re-run this skill."
 
 If the version check printed a `WARN:` line, pass it through to the user verbatim
 (non-blocking — Codex may still work, but the user should upgrade).
 
-The probe multi-signal auth logic accepts: `$CODEX_API_KEY` set, `$OPENAI_API_KEY`
+The probe multi-signal auth logic accepts: `$CODEX_API_KEY` set, `$GSTACK_OPENAI_API_KEY`
 set, or `${CODEX_HOME:-~/.codex}/auth.json` exists. Avoids false-negatives for
 env-auth users (CI, platform engineers) that file-only checks would reject.
 

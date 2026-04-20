@@ -63,12 +63,12 @@ describe('gstack-codex-probe: auth probe', () => {
     }
   });
 
-  test('OPENAI_API_KEY set → AUTH_OK', () => {
+  test('GSTACK_OPENAI_API_KEY set → AUTH_OK', () => {
     const home = tempHome();
     try {
       const r = runProbe({
         snippet: '_gstack_codex_auth_probe',
-        env: { OPENAI_API_KEY: 'sk-openai' },
+        env: { GSTACK_OPENAI_API_KEY: 'sk-openai' },
         home,
       });
       expect(r.stdout.trim()).toBe('AUTH_OK');
@@ -102,12 +102,12 @@ describe('gstack-codex-probe: auth probe', () => {
     }
   });
 
-  test('both CODEX_API_KEY and OPENAI_API_KEY set → AUTH_OK', () => {
+  test('both CODEX_API_KEY and GSTACK_OPENAI_API_KEY set → AUTH_OK', () => {
     const home = tempHome();
     try {
       const r = runProbe({
         snippet: '_gstack_codex_auth_probe',
-        env: { CODEX_API_KEY: 'k1', OPENAI_API_KEY: 'k2' },
+        env: { CODEX_API_KEY: 'k1', GSTACK_OPENAI_API_KEY: 'k2' },
         home,
       });
       expect(r.stdout.trim()).toBe('AUTH_OK');
@@ -122,7 +122,7 @@ describe('gstack-codex-probe: auth probe', () => {
     try {
       const r = runProbe({
         snippet: '_gstack_codex_auth_probe',
-        env: { CODEX_API_KEY: '', OPENAI_API_KEY: '' },
+        env: { CODEX_API_KEY: '', GSTACK_OPENAI_API_KEY: '' },
         home,
       });
       expect(r.stdout.trim()).toBe('AUTH_FAILED');
@@ -137,7 +137,7 @@ describe('gstack-codex-probe: auth probe', () => {
     try {
       const r = runProbe({
         snippet: '_gstack_codex_auth_probe',
-        env: { CODEX_API_KEY: '   ', OPENAI_API_KEY: '\t\n' },
+        env: { CODEX_API_KEY: '   ', GSTACK_OPENAI_API_KEY: '\t\n' },
         home,
       });
       expect(r.stdout.trim()).toBe('AUTH_FAILED');
@@ -348,7 +348,7 @@ describe('gstack-codex-probe: telemetry event emission', () => {
         env: {
           _TEL: 'community',
           CODEX_API_KEY: 'SECRET_TOKEN_SHOULD_NOT_LEAK',
-          OPENAI_API_KEY: 'ANOTHER_SECRET',
+          GSTACK_OPENAI_API_KEY: 'ANOTHER_SECRET',
         },
         home,
       });

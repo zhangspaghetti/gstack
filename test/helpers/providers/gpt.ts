@@ -8,7 +8,7 @@ import * as os from 'os';
 /**
  * GPT adapter — wraps the OpenAI `codex` CLI (codex exec with --json output).
  *
- * Codex uses ~/.codex/ for auth (not OPENAI_API_KEY). The --json flag emits
+ * Codex uses ~/.codex/ for auth (not GSTACK_OPENAI_API_KEY). The --json flag emits
  * JSONL events; we parse `turn.completed` for usage and `agent_message` / etc.
  * for output aggregation.
  */

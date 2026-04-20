@@ -3,7 +3,7 @@
  *
  * Resolution order:
  * 1. ~/.gstack/openai.json → { "api_key": "sk-..." }
- * 2. OPENAI_API_KEY environment variable
+ * 2. GSTACK_OPENAI_API_KEY environment variable
  * 3. null (caller handles guided setup or fallback)
  */
 
@@ -27,8 +27,8 @@ export function resolveApiKey(): string | null {
   }
 
   // 2. Check environment variable
-  if (process.env.OPENAI_API_KEY) {
-    return process.env.OPENAI_API_KEY;
+  if (process.env.GSTACK_OPENAI_API_KEY) {
+    return process.env.GSTACK_OPENAI_API_KEY;
   }
 
   return null;
@@ -46,10 +46,10 @@ export function saveApiKey(key: string): void {
 
 /**
  * Get the OpenAI API base URL.
- * Reads OPENAI_HOST from environment, falls back to https://api.openai.com.
+ * Reads GSTACK_OPENAI_HOST from environment, falls back to https://api.openai.com.
  */
 export function openaiBase(): string {
-  return process.env.OPENAI_HOST ?? "https://api.openai.com";
+  return process.env.GSTACK_OPENAI_HOST ?? "https://api.openai.com";
 }
 
 /**
@@ -62,7 +62,7 @@ export function requireApiKey(): string {
     console.error("");
     console.error("Run: $D setup");
     console.error("  or save to ~/.gstack/openai.json: { \"api_key\": \"sk-...\" }");
-    console.error("  or set OPENAI_API_KEY environment variable");
+    console.error("  or set GSTACK_OPENAI_API_KEY environment variable");
     console.error("");
     console.error("Get a key at: https://platform.openai.com/api-keys");
     process.exit(1);
