@@ -8,7 +8,7 @@
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey } from "./auth";
+import { requireApiKey, openaiBase } from "./auth";
 import { readSession, updateSession } from "./session";
 
 export interface IterateOptions {
@@ -85,7 +85,7 @@ async function callWithThreading(
   const timeout = setTimeout(() => controller.abort(), 120_000);
 
   try {
-    const response = await fetch("http://127.0.0.1:8317/v1/responses", {
+    const response = await fetch(`${openaiBase()}/v1/responses`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
@@ -133,16 +133,7 @@ async function callFresh(
   const timeout = setTimeout(() => controller.abort(), 120_000);
 
   try {
-    const response = await fetch("http://127.0.0.1:8317/v1/responses", {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        input: prompt,
-        tools: [{ type: "image_generation", size: "1536x1024", quality: "high" }],
+    const response = await fetch(`${openaiBase()}/v1/responses`, {
       }),
       signal: controller.signal,
     });

@@ -45,7 +45,7 @@ async function generateMockup(brief: { name: string; prompt: string }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000); // 2 min timeout
 
-  const response = await fetch("http://127.0.0.1:8317/v1/responses", {
+  const response = await fetch(`${process.env.OPENAI_HOST ?? "https://api.openai.com"}/v1/responses`, {
     method: "POST",
     headers: {
       "Authorization": `Bearer ${API_KEY}`,

@@ -45,6 +45,14 @@ export function saveApiKey(key: string): void {
 }
 
 /**
+ * Get the OpenAI API base URL.
+ * Reads OPENAI_HOST from environment, falls back to https://api.openai.com.
+ */
+export function openaiBase(): string {
+  return process.env.OPENAI_HOST ?? "https://api.openai.com";
+}
+
+/**
  * Get API key or exit with setup instructions.
  */
 export function requireApiKey(): string {

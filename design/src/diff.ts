@@ -5,7 +5,7 @@
  */
 
 import fs from "fs";
-import { requireApiKey } from "./auth";
+import { requireApiKey, openaiBase } from "./auth";
 
 export interface DiffResult {
   differences: { area: string; description: string; severity: string }[];
@@ -28,7 +28,7 @@ export async function diffMockups(
   const timeout = setTimeout(() => controller.abort(), 60_000);
 
   try {
-    const response = await fetch("http://127.0.0.1:8317/v1/chat/completions", {
+    const response = await fetch(`${openaiBase()}/v1/chat/completions`, {
       method: "POST",
       headers: {
         "Authorization": `Bearer ${apiKey}`,
