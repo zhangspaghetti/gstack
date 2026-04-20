@@ -7,7 +7,7 @@ const copilot: HostConfig = {
   cliAliases: [],
 
   globalRoot: '.copilot/skills/gstack',
-  localSkillRoot: '.copilot/skills/gstack',
+  localSkillRoot: '.github/skills/gstack',
   hostSubdir: '.copilot',
   usesEnvVars: true,
 
@@ -25,6 +25,7 @@ const copilot: HostConfig = {
   pathRewrites: [
     { from: '~/.claude/skills/gstack', to: '~/.copilot/skills/gstack' },
     { from: '.claude/skills/gstack', to: '.copilot/skills/gstack' },
+    { from: '.claude/skills/review', to: '.copilot/skills/gstack/review' },
     { from: '.claude/skills', to: '.copilot/skills' },
   ],
 
