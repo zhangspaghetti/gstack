@@ -539,10 +539,11 @@ describe('host config correctness', () => {
     expect(openclaw.staticFiles).toBeUndefined();
   });
 
-  test('gsd keeps generator and runtime paths aligned under .gsd/agent/skills', () => {
-    expect(gsd.globalRoot).toBe('.gsd/agent/skills/gstack');
+  test('gsd uses ~/.agents globally and .gsd/agent/skills locally', () => {
+    expect(gsd.globalRoot).toBe('.agents/skills/gstack');
     expect(gsd.localSkillRoot).toBe('.gsd/agent/skills/gstack');
     expect(gsd.hostSubdir).toBe('.gsd/agent');
+    expect(gsd.pathRewrites.some(r => r.from === '~/.claude/skills/gstack' && r.to === '~/.agents/skills/gstack')).toBe(true);
     expect(gsd.pathRewrites.some(r => r.from === '.claude/skills' && r.to === '.gsd/agent/skills')).toBe(true);
     expect(gsd.pathRewrites.some(r => r.from === '.claude/skills/review' && r.to === '.gsd/agent/skills/gstack/review')).toBe(true);
     expect(gsd.suppressedResolvers).toContain('GBRAIN_CONTEXT_LOAD');

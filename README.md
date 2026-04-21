@@ -115,7 +115,7 @@ Or target a specific agent with `./setup --host <name>`:
 |-------|------|-------------------|
 | GitHub Copilot | `--host copilot` | `~/.copilot/skills/gstack-*/` |
 | OpenAI Codex CLI | `--host codex` | `~/.codex/skills/gstack-*/` |
-| GSD | `--host gsd` | `~/.gsd/agent/skills/gstack-*/` |
+| GSD | `--host gsd` | `~/.agents/skills/gstack-*/` |
 | OpenCode | `--host opencode` | `~/.config/opencode/skills/gstack-*/` |
 | Cursor | `--host cursor` | `~/.cursor/skills/gstack-*/` |
 | Factory Droid | `--host factory` | `~/.factory/skills/gstack-*/` |

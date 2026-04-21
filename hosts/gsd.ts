@@ -6,7 +6,7 @@ const gsd: HostConfig = {
   cliCommand: 'gsd',
   cliAliases: [],
 
-  globalRoot: '.gsd/agent/skills/gstack',
+  globalRoot: '.agents/skills/gstack',
   localSkillRoot: '.gsd/agent/skills/gstack',
   hostSubdir: '.gsd/agent',
   usesEnvVars: true,
@@ -23,9 +23,9 @@ const gsd: HostConfig = {
   },
 
   pathRewrites: [
-    { from: '~/.claude/skills/gstack', to: '~/.gsd/agent/skills/gstack' },
+    { from: '~/.claude/skills/gstack', to: '~/.agents/skills/gstack' },
     { from: '.claude/skills/gstack', to: '.gsd/agent/skills/gstack' },
-    { from: '~/.claude/skills/review', to: '~/.gsd/agent/skills/gstack/review' },
+    { from: '~/.claude/skills/review', to: '~/.agents/skills/gstack/review' },
     { from: '.claude/skills/review', to: '.gsd/agent/skills/gstack/review' },
     { from: '.claude/skills', to: '.gsd/agent/skills' },
   ],

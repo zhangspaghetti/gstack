@@ -362,7 +362,7 @@ describe('gen-skill-docs', () => {
     // Scope to frontmatter (between the first two --- lines) — the body can
     // legitimately mention these tool names in prose (e.g., Claude model
     // overlay says "prefer Read, Edit, Write, Glob, Grep over Bash").
-    const fmMatch = qaOnlyContent.match(/^---\n([\s\S]*?)\n---/);
+    const fmMatch = qaOnlyContent.match(/^---\r?\n([\s\S]*?)\r?\n---/);
     expect(fmMatch).not.toBeNull();
     const frontmatter = fmMatch![1];
     expect(frontmatter).toMatch(/allowed-tools:/);
@@ -1977,7 +1977,7 @@ describe('Parameterized host smoke tests', () => {
           const skillMd = path.join(hostDir, skill, 'SKILL.md');
           if (!fs.existsSync(skillMd)) continue;
           const content = fs.readFileSync(skillMd, 'utf-8');
-          expect(content).toMatch(/^---\n/);
+          expect(content).toMatch(/^---\r?\n/);
           expect(content).toMatch(/^name:\s/m);
           expect(content).toMatch(/^description:\s/m);
         }
@@ -2170,10 +2170,11 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('OPENCODE_GSTACK="$OPENCODE_SKILLS/gstack"');
   });
 
-  test('setup supports --host gsd with nested agent skill path vars', () => {
+  test('setup supports --host gsd with ~/.agents install root and nested local generation path', () => {
     expect(setupContent).toContain('INSTALL_GSD=');
-    expect(setupContent).toContain('GSD_SKILLS="$HOME/.gsd/agent/skills"');
+    expect(setupContent).toContain('GSD_SKILLS="$HOME/.agents/skills"');
     expect(setupContent).toContain('GSD_GSTACK="$GSD_SKILLS/gstack"');
+    expect(setupContent).toContain('bun run gen:skill-docs --host gsd');
     expect(setupContent).toContain('create_gsd_runtime_root');
     expect(setupContent).toContain('link_gsd_skill_dirs');
   });
@@ -2209,6 +2210,23 @@ describe('setup script validation', () => {
     const gsdFnEnd = setupContent.indexOf('}', setupContent.indexOf('linked[@]}', gsdFnStart));
     const gsdFnBody = setupContent.slice(gsdFnStart, gsdFnEnd);
     expect(gsdFnBody).toContain('replace_managed_skill_target "$target"');
+  });
+
+  test('setup patches GSD generated skill names before linking them', () => {
+    const gsdFnStart = setupContent.indexOf('link_gsd_skill_dirs()');
+    const gsdFnEnd = setupContent.indexOf('}', setupContent.indexOf('linked[@]}', gsdFnStart));
+    const gsdFnBody = setupContent.slice(gsdFnStart, gsdFnEnd);
+    expect(gsdFnBody).toContain('gstack-patch-names');
+    expect(gsdFnBody).toContain('"$gsd_dir" "$SKILL_PREFIX"');
+  });
+
+  test('setup installs GSD skills as real directories with copied SKILL.md files', () => {
+    const gsdFnStart = setupContent.indexOf('link_gsd_skill_dirs()');
+    const gsdFnEnd = setupContent.indexOf('}', setupContent.indexOf('linked[@]}', gsdFnStart));
+    const gsdFnBody = setupContent.slice(gsdFnStart, gsdFnEnd);
+    expect(gsdFnBody).toContain('mkdir -p "$target"');
+    expect(gsdFnBody).toContain('cp "$skill_dir/SKILL.md" "$target/SKILL.md"');
+    expect(gsdFnBody).not.toContain('ln -snf "$skill_dir" "$target"');
   });
 
   test('setup rebuild guard covers all compiled runtime binaries', () => {
@@ -2257,17 +2275,15 @@ describe('setup script validation', () => {
     expect(fnBody).toContain('dx-hall-of-fame.md');
   });
 
-  test('generated GSD preambles use .gsd/agent/skills local fallback paths', () => {
+  test('generated GSD preambles use ~/.agents globally and .gsd/agent/skills locally', () => {
     const gsdSkillDir = path.join(ROOT, '.gsd', 'agent', 'skills', 'gstack-review');
-    if (!fs.existsSync(gsdSkillDir)) {
-      Bun.spawnSync(['bun', 'run', 'scripts/gen-skill-docs.ts', '--host', 'gsd'], {
-        cwd: ROOT, stdout: 'pipe', stderr: 'pipe',
-      });
-    }
+    Bun.spawnSync(['bun', 'run', 'scripts/gen-skill-docs.ts', '--host', 'gsd'], {
+      cwd: ROOT, stdout: 'pipe', stderr: 'pipe',
+    });
     expect(fs.existsSync(gsdSkillDir)).toBe(true);
     const content = fs.readFileSync(path.join(gsdSkillDir, 'SKILL.md'), 'utf-8');
     expect(content).toContain('$_ROOT/.gsd/agent/skills/gstack');
-    expect(content).toContain('~/.gsd/agent/skills/gstack');
+    expect(content).toContain('~/.agents/skills/gstack');
   });
 
   test('generated GSD skills suppress GBrain-only instructions on non-brain hosts', () => {

@@ -26,7 +26,7 @@ FACTORY_SKILLS="$HOME/.factory/skills"
 FACTORY_GSTACK="$FACTORY_SKILLS/gstack"
 OPENCODE_SKILLS="$HOME/.config/opencode/skills"
 OPENCODE_GSTACK="$OPENCODE_SKILLS/gstack"
-GSD_SKILLS="$HOME/.gsd/agent/skills"
+GSD_SKILLS="$HOME/.agents/skills"
 GSD_GSTACK="$GSD_SKILLS/gstack"
 
 IS_WINDOWS=0
@@ -983,13 +983,19 @@ link_gsd_skill_dirs() {
     return 1
   fi
 
+  # GSD skill discovery reads SKILL.md frontmatter as well as directory names.
+  # Keep generated gstack-* directories and name: fields aligned with the
+  # user's skill_prefix setting so invocation names stay consistent.
+  "$gstack_dir/bin/gstack-patch-names" "$gsd_dir" "$SKILL_PREFIX"
+
   for skill_dir in "$gsd_dir"/gstack*/; do
     if [ -f "$skill_dir/SKILL.md" ]; then
       skill_name="$(basename "$skill_dir")"
       [ "$skill_name" = "gstack" ] && continue
       target="$skills_dir/$skill_name"
       replace_managed_skill_target "$target"
-      ln -snf "$skill_dir" "$target"
+      mkdir -p "$target"
+      cp "$skill_dir/SKILL.md" "$target/SKILL.md"
       linked+=("$skill_name")
     fi
   done
@@ -1182,6 +1188,8 @@ fi
 
 # 6e. Install for GSD
 if [ "$INSTALL_GSD" -eq 1 ]; then
+  echo "  Generating .gsd/agent/ skill docs..."
+  ( cd "$SOURCE_GSTACK_DIR" && bun run gen:skill-docs --host gsd )
   mkdir -p "$GSD_SKILLS"
   create_gsd_runtime_root "$SOURCE_GSTACK_DIR" "$GSD_GSTACK"
   link_gsd_skill_dirs "$SOURCE_GSTACK_DIR" "$GSD_SKILLS"
