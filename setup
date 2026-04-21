@@ -24,6 +24,8 @@ FACTORY_SKILLS="$HOME/.factory/skills"
 FACTORY_GSTACK="$FACTORY_SKILLS/gstack"
 OPENCODE_SKILLS="$HOME/.config/opencode/skills"
 OPENCODE_GSTACK="$OPENCODE_SKILLS/gstack"
+GSD_SKILLS="$HOME/.gsd/agent/skills"
+GSD_GSTACK="$GSD_SKILLS/gstack"
 
 IS_WINDOWS=0
 case "$(uname -s)" in
@@ -33,6 +35,9 @@ esac
 # ─── Quiet mode helper ────────────────────────────────────────
 QUIET=0
 log() { [ "$QUIET" -eq 0 ] && echo "$@" || true; }
+compiled_binary_exists() {
+  [ -f "$1" ] || [ -f "$1.exe" ]
+}
 
 # ─── Parse flags ──────────────────────────────────────────────
 HOST="claude"
@@ -43,7 +48,7 @@ TEAM_MODE=0
 NO_TEAM_MODE=0
 while [ $# -gt 0 ]; do
   case "$1" in
-    --host) [ -z "$2" ] && echo "Missing value for --host (expected claude, codex, kiro, factory, opencode, openclaw, hermes, gbrain, or auto)" >&2 && exit 1; HOST="$2"; shift 2 ;;
+    --host) [ -z "$2" ] && echo "Missing value for --host (expected claude, codex, kiro, factory, opencode, gsd, openclaw, hermes, gbrain, or auto)" >&2 && exit 1; HOST="$2"; shift 2 ;;
     --host=*) HOST="${1#--host=}"; shift ;;
     --local) LOCAL_INSTALL=1; shift ;;
     --prefix)    SKILL_PREFIX=1; SKILL_PREFIX_FLAG=1; shift ;;
@@ -91,7 +96,7 @@ case "$HOST" in
     echo "GBrain setup and brain skills ship from the GBrain repo."
     echo ""
     exit 0 ;;
-  *) echo "Unknown --host value: $HOST (expected claude, codex, kiro, factory, opencode, openclaw, hermes, gbrain, or auto)" >&2; exit 1 ;;
+  *) echo "Unknown --host value: $HOST (expected claude, codex, kiro, factory, opencode, gsd, openclaw, hermes, gbrain, or auto)" >&2; exit 1 ;;
 esac
 
 # ─── Resolve skill prefix preference ─────────────────────────
@@ -155,14 +160,16 @@ INSTALL_CODEX=0
 INSTALL_KIRO=0
 INSTALL_FACTORY=0
 INSTALL_OPENCODE=0
+INSTALL_GSD=0
 if [ "$HOST" = "auto" ]; then
   command -v claude >/dev/null 2>&1 && INSTALL_CLAUDE=1
   command -v codex >/dev/null 2>&1 && INSTALL_CODEX=1
   command -v kiro-cli >/dev/null 2>&1 && INSTALL_KIRO=1
   command -v droid >/dev/null 2>&1 && INSTALL_FACTORY=1
   command -v opencode >/dev/null 2>&1 && INSTALL_OPENCODE=1
+  command -v gsd >/dev/null 2>&1 && INSTALL_GSD=1
   # If none found, default to claude
-  if [ "$INSTALL_CLAUDE" -eq 0 ] && [ "$INSTALL_CODEX" -eq 0 ] && [ "$INSTALL_KIRO" -eq 0 ] && [ "$INSTALL_FACTORY" -eq 0 ] && [ "$INSTALL_OPENCODE" -eq 0 ]; then
+  if [ "$INSTALL_CLAUDE" -eq 0 ] && [ "$INSTALL_CODEX" -eq 0 ] && [ "$INSTALL_KIRO" -eq 0 ] && [ "$INSTALL_FACTORY" -eq 0 ] && [ "$INSTALL_OPENCODE" -eq 0 ] && [ "$INSTALL_GSD" -eq 0 ]; then
     INSTALL_CLAUDE=1
   fi
 elif [ "$HOST" = "claude" ]; then
@@ -175,6 +182,8 @@ elif [ "$HOST" = "factory" ]; then
   INSTALL_FACTORY=1
 elif [ "$HOST" = "opencode" ]; then
   INSTALL_OPENCODE=1
+elif [ "$HOST" = "gsd" ]; then
+  INSTALL_GSD=1
 fi
 
 migrate_direct_codex_install() {
@@ -222,7 +231,15 @@ ensure_playwright_browser() {
 
 # 1. Build browse binary if needed (smart rebuild: stale sources, package.json, lock)
 NEEDS_BUILD=0
-if [ ! -x "$BROWSE_BIN" ]; then
+if ! compiled_binary_exists "$BROWSE_BIN"; then
+  NEEDS_BUILD=1
+elif ! compiled_binary_exists "$SOURCE_GSTACK_DIR/browse/dist/find-browse"; then
+  NEEDS_BUILD=1
+elif ! compiled_binary_exists "$SOURCE_GSTACK_DIR/design/dist/design"; then
+  NEEDS_BUILD=1
+elif ! compiled_binary_exists "$SOURCE_GSTACK_DIR/make-pdf/dist/pdf"; then
+  NEEDS_BUILD=1
+elif ! compiled_binary_exists "$SOURCE_GSTACK_DIR/bin/gstack-global-discover"; then
   NEEDS_BUILD=1
 elif [ -n "$(find "$SOURCE_GSTACK_DIR/browse/src" -type f -newer "$BROWSE_BIN" -print -quit 2>/dev/null)" ]; then
   NEEDS_BUILD=1
@@ -279,6 +296,13 @@ if [ "$NEEDS_BUILD" -eq 1 ]; then
   fi
 fi
 
+for _bin in browse/dist/browse browse/dist/find-browse design/dist/design make-pdf/dist/pdf bin/gstack-global-discover; do
+  if ! compiled_binary_exists "$SOURCE_GSTACK_DIR/$_bin"; then
+    echo "gstack setup failed: compiled binary missing at $SOURCE_GSTACK_DIR/$_bin(.exe)" >&2
+    exit 1
+  fi
+done
+
 if [ ! -x "$BROWSE_BIN" ]; then
   echo "gstack setup failed: browse binary missing at $BROWSE_BIN" >&2
   exit 1
@@ -318,6 +342,16 @@ if [ "$INSTALL_OPENCODE" -eq 1 ] && [ "$NEEDS_BUILD" -eq 0 ]; then
     cd "$SOURCE_GSTACK_DIR"
     bun install --frozen-lockfile 2>/dev/null || bun install
     bun run gen:skill-docs --host opencode
+  )
+fi
+
+# 1e. Generate .gsd/agent/ GSD skill docs
+if [ "$INSTALL_GSD" -eq 1 ] && [ "$NEEDS_BUILD" -eq 0 ]; then
+  log "Generating .gsd/agent/ skill docs..."
+  (
+    cd "$SOURCE_GSTACK_DIR"
+    bun install --frozen-lockfile 2>/dev/null || bun install
+    bun run gen:skill-docs --host gsd
   )
 fi
 
@@ -763,6 +797,79 @@ link_opencode_skill_dirs() {
   fi
 }
 
+create_gsd_runtime_root() {
+  local gstack_dir="$1"
+  local gsd_gstack="$2"
+  local gsd_dir="$gstack_dir/.gsd/agent/skills"
+
+  if [ -L "$gsd_gstack" ]; then
+    rm -f "$gsd_gstack"
+  elif [ -d "$gsd_gstack" ] && [ "$gsd_gstack" != "$gstack_dir" ]; then
+    rm -rf "$gsd_gstack"
+  fi
+
+  mkdir -p "$gsd_gstack" "$gsd_gstack/browse" "$gsd_gstack/gstack-upgrade" "$gsd_gstack/review"
+
+  if [ -f "$gsd_dir/gstack/SKILL.md" ]; then
+    ln -snf "$gsd_dir/gstack/SKILL.md" "$gsd_gstack/SKILL.md"
+  fi
+  if [ -d "$gstack_dir/bin" ]; then
+    ln -snf "$gstack_dir/bin" "$gsd_gstack/bin"
+  fi
+  if [ -d "$gstack_dir/browse/dist" ]; then
+    ln -snf "$gstack_dir/browse/dist" "$gsd_gstack/browse/dist"
+  fi
+  if [ -d "$gstack_dir/browse/bin" ]; then
+    ln -snf "$gstack_dir/browse/bin" "$gsd_gstack/browse/bin"
+  fi
+  if [ -f "$gsd_dir/gstack-upgrade/SKILL.md" ]; then
+    ln -snf "$gsd_dir/gstack-upgrade/SKILL.md" "$gsd_gstack/gstack-upgrade/SKILL.md"
+  fi
+  for f in checklist.md design-checklist.md greptile-triage.md TODOS-format.md; do
+    if [ -f "$gstack_dir/review/$f" ]; then
+      ln -snf "$gstack_dir/review/$f" "$gsd_gstack/review/$f"
+    fi
+  done
+  if [ -d "$gstack_dir/review/specialists" ]; then
+    ln -snf "$gstack_dir/review/specialists" "$gsd_gstack/review/specialists"
+  fi
+  if [ -f "$gstack_dir/ETHOS.md" ]; then
+    ln -snf "$gstack_dir/ETHOS.md" "$gsd_gstack/ETHOS.md"
+  fi
+}
+
+link_gsd_skill_dirs() {
+  local gstack_dir="$1"
+  local skills_dir="$2"
+  local gsd_dir="$gstack_dir/.gsd/agent/skills"
+  local linked=()
+
+  if [ ! -d "$gsd_dir" ]; then
+    echo "  Generating .gsd/agent/ skill docs..."
+    ( cd "$gstack_dir" && bun run gen:skill-docs --host gsd )
+  fi
+
+  if [ ! -d "$gsd_dir" ]; then
+    echo "  warning: .gsd/agent/skills/ generation failed — run 'bun run gen:skill-docs --host gsd' manually" >&2
+    return 1
+  fi
+
+  for skill_dir in "$gsd_dir"/gstack*/; do
+    if [ -f "$skill_dir/SKILL.md" ]; then
+      skill_name="$(basename "$skill_dir")"
+      [ "$skill_name" = "gstack" ] && continue
+      target="$skills_dir/$skill_name"
+      if [ -L "$target" ] || [ ! -e "$target" ]; then
+        ln -snf "$skill_dir" "$target"
+        linked+=("$skill_name")
+      fi
+    fi
+  done
+  if [ ${#linked[@]} -gt 0 ]; then
+    echo "  linked skills: ${linked[*]}"
+  fi
+}
+
 # 4. Install for Claude (default)
 SKILLS_BASENAME="$(basename "$INSTALL_SKILLS_DIR")"
 SKILLS_PARENT_BASENAME="$(basename "$(dirname "$INSTALL_SKILLS_DIR")")"
@@ -933,6 +1040,16 @@ if [ "$INSTALL_OPENCODE" -eq 1 ]; then
   echo "gstack ready (opencode)."
   echo "  browse: $BROWSE_BIN"
   echo "  opencode skills: $OPENCODE_SKILLS"
+fi
+
+# 6d. Install for GSD
+if [ "$INSTALL_GSD" -eq 1 ]; then
+  mkdir -p "$GSD_SKILLS"
+  create_gsd_runtime_root "$SOURCE_GSTACK_DIR" "$GSD_GSTACK"
+  link_gsd_skill_dirs "$SOURCE_GSTACK_DIR" "$GSD_SKILLS"
+  echo "gstack ready (gsd)."
+  echo "  browse: $BROWSE_BIN"
+  echo "  gsd skills: $GSD_SKILLS"
 fi
 
 # 7. Create .agents/ sidecar symlinks for the real Codex skill target.

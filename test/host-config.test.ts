@@ -22,6 +22,7 @@ import {
   slate,
   cursor,
   openclaw,
+  gsd,
 } from '../hosts/index';
 import { HOST_PATHS } from '../scripts/resolvers/types';
 
@@ -30,8 +31,8 @@ const ROOT = path.resolve(import.meta.dir, '..');
 // ─── hosts/index.ts ─────────────────────────────────────────
 
 describe('hosts/index.ts', () => {
-  test('ALL_HOST_CONFIGS has 10 hosts', () => {
-    expect(ALL_HOST_CONFIGS.length).toBe(10);
+  test('ALL_HOST_CONFIGS has 12 hosts', () => {
+    expect(ALL_HOST_CONFIGS.length).toBe(12);
   });
 
   test('ALL_HOST_NAMES matches config names', () => {
@@ -53,6 +54,7 @@ describe('hosts/index.ts', () => {
     expect(slate.name).toBe('slate');
     expect(cursor.name).toBe('cursor');
     expect(openclaw.name).toBe('openclaw');
+    expect(gsd.name).toBe('gsd');
   });
 
   test('getHostConfig returns correct config', () => {
@@ -500,6 +502,17 @@ describe('host config correctness', () => {
 
   test('openclaw has no staticFiles (SOUL.md removed)', () => {
     expect(openclaw.staticFiles).toBeUndefined();
+  });
+
+  test('gsd keeps generator and runtime paths aligned under .gsd/agent/skills', () => {
+    expect(gsd.globalRoot).toBe('.gsd/agent/skills/gstack');
+    expect(gsd.localSkillRoot).toBe('.gsd/agent/skills/gstack');
+    expect(gsd.hostSubdir).toBe('.gsd/agent');
+    expect(gsd.pathRewrites.some(r => r.from === '.claude/skills' && r.to === '.gsd/agent/skills')).toBe(true);
+    expect(gsd.runtimeRoot.globalSymlinks).toContain('browse/dist');
+    expect(gsd.runtimeRoot.globalSymlinks).toContain('review/specialists');
+    expect(gsd.runtimeRoot.globalFiles?.review).toContain('design-checklist.md');
+    expect(gsd.runtimeRoot.globalFiles?.review).toContain('greptile-triage.md');
   });
 
   test('openclaw includeSkills is empty (native skills replaced generated ones)', () => {

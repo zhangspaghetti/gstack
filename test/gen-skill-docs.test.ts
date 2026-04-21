@@ -2125,16 +2125,18 @@ describe('setup script validation', () => {
     expect(fnBody).toContain('rm -f "$target"');
   });
 
-  test('setup supports --host auto|claude|codex|kiro|opencode', () => {
+  test('setup supports --host auto|claude|codex|kiro|factory|opencode|gsd', () => {
     expect(setupContent).toContain('--host');
-    expect(setupContent).toContain('claude|codex|kiro|factory|opencode|auto');
+    expect(setupContent).toContain('claude|codex|kiro|factory|opencode|copilot|gsd|auto');
   });
 
-  test('auto mode detects claude, codex, kiro, and opencode binaries', () => {
+  test('auto mode detects claude, codex, kiro, factory, opencode, and gsd binaries', () => {
     expect(setupContent).toContain('command -v claude');
     expect(setupContent).toContain('command -v codex');
     expect(setupContent).toContain('command -v kiro-cli');
+    expect(setupContent).toContain('command -v droid');
     expect(setupContent).toContain('command -v opencode');
+    expect(setupContent).toContain('command -v gsd');
   });
 
   // T1: Sidecar skip guard — prevents .agents/skills/gstack from being linked as a skill
@@ -2167,6 +2169,23 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('OPENCODE_GSTACK="$OPENCODE_SKILLS/gstack"');
   });
 
+  test('setup supports --host gsd with nested agent skill path vars', () => {
+    expect(setupContent).toContain('INSTALL_GSD=');
+    expect(setupContent).toContain('GSD_SKILLS="$HOME/.gsd/agent/skills"');
+    expect(setupContent).toContain('GSD_GSTACK="$GSD_SKILLS/gstack"');
+    expect(setupContent).toContain('create_gsd_runtime_root');
+    expect(setupContent).toContain('link_gsd_skill_dirs');
+  });
+
+  test('setup rebuild guard covers all compiled runtime binaries', () => {
+    expect(setupContent).toContain('compiled_binary_exists()');
+    expect(setupContent).toContain('browse/dist/find-browse');
+    expect(setupContent).toContain('design/dist/design');
+    expect(setupContent).toContain('make-pdf/dist/pdf');
+    expect(setupContent).toContain('bin/gstack-global-discover');
+    expect(setupContent).toContain('compiled binary missing at $SOURCE_GSTACK_DIR/$_bin(.exe)');
+  });
+
   test('setup installs OpenCode skills into a nested gstack runtime root', () => {
     expect(setupContent).toContain('create_opencode_runtime_root');
     expect(setupContent).toContain('.opencode/skills');
@@ -2174,6 +2193,28 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('qa/templates');
     expect(setupContent).toContain('qa/references');
     expect(setupContent).toContain('dx-hall-of-fame.md');
+  });
+
+  test('setup installs GSD review runtime assets used by /review', () => {
+    const fnStart = setupContent.indexOf('create_gsd_runtime_root()');
+    const fnEnd = setupContent.indexOf('}', setupContent.indexOf('ln -snf "$gstack_dir/ETHOS.md"', fnStart));
+    const fnBody = setupContent.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('design-checklist.md');
+    expect(fnBody).toContain('greptile-triage.md');
+    expect(fnBody).toContain('review/specialists');
+  });
+
+  test('generated GSD preambles use .gsd/agent/skills local fallback paths', () => {
+    const gsdSkillDir = path.join(ROOT, '.gsd', 'agent', 'skills', 'gstack-review');
+    if (!fs.existsSync(gsdSkillDir)) {
+      Bun.spawnSync(['bun', 'run', 'scripts/gen-skill-docs.ts', '--host', 'gsd'], {
+        cwd: ROOT, stdout: 'pipe', stderr: 'pipe',
+      });
+    }
+    expect(fs.existsSync(gsdSkillDir)).toBe(true);
+    const content = fs.readFileSync(path.join(gsdSkillDir, 'SKILL.md'), 'utf-8');
+    expect(content).toContain('$_ROOT/.gsd/agent/skills/gstack');
+    expect(content).toContain('~/.gsd/agent/skills/gstack');
   });
 
   test('create_agents_sidecar links runtime assets', () => {

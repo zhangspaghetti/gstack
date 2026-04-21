@@ -7,8 +7,8 @@ const gsd: HostConfig = {
   cliAliases: [],
 
   globalRoot: '.gsd/agent/skills/gstack',
-  localSkillRoot: '.claude/skills/gstack',
-  hostSubdir: '.gsd',
+  localSkillRoot: '.gsd/agent/skills/gstack',
+  hostSubdir: '.gsd/agent',
   usesEnvVars: true,
 
   frontmatter: {
@@ -24,12 +24,15 @@ const gsd: HostConfig = {
 
   pathRewrites: [
     { from: '~/.claude/skills/gstack', to: '~/.gsd/agent/skills/gstack' },
-    { from: '~/.claude/skills/review', to: '~/.gsd/agent/skills/review' }
+    { from: '.claude/skills/gstack', to: '.gsd/agent/skills/gstack' },
+    { from: '~/.claude/skills/review', to: '~/.gsd/agent/skills/review' },
+    { from: '.claude/skills/review', to: '.gsd/agent/skills/review' },
+    { from: '.claude/skills', to: '.gsd/agent/skills' },
   ],
 
   runtimeRoot: {
-    globalSymlinks: ['bin', 'browse/dist', 'browse/bin', 'gstack-upgrade', 'ETHOS.md'],
-    globalFiles: { 'review': ['checklist.md', 'TODOS-format.md'] },
+    globalSymlinks: ['bin', 'browse/dist', 'browse/bin', 'gstack-upgrade', 'ETHOS.md', 'review/specialists'],
+    globalFiles: { 'review': ['checklist.md', 'design-checklist.md', 'greptile-triage.md', 'TODOS-format.md'] },
   },
 
   install: {

@@ -2,8 +2,9 @@
 
 gstack uses a declarative host config system. Each supported AI coding agent
 (Claude, Codex, Factory, Kiro, OpenCode, Slate, Cursor, OpenClaw) is defined
-as a typed TypeScript config object. Adding a new host means creating one file
-and re-exporting it. Zero code changes to the generator, setup, or tooling.
+as a typed TypeScript config object. The generator and most tooling are
+config-driven, but a new installable host still needs an end-to-end setup
+check, especially if its runtime root differs from `.<host>/skills`.
 
 ## How it works
 
@@ -28,8 +29,10 @@ Each config file exports a `HostConfig` object that tells the generator:
 - What resolver sections to suppress
 - What assets to symlink at install time
 
-The generator, setup script, platform-detect, uninstall, health checks, worktree
-copy, and tests all read from these configs. None of them have per-host code.
+The generator, platform-detect, uninstall, health checks, worktree copy, and
+tests all read from these configs. The remaining risk surface is install
+behavior: if your host needs a custom runtime root or generated-skill location,
+verify `setup` still creates and links the right directories.
 
 ## Step-by-step: add a new host
 
@@ -108,7 +111,22 @@ export { claude, codex, factory, kiro, opencode, slate, cursor, openclaw, myhost
 
 Add `.myhost/` to `.gitignore` (generated skill docs are gitignored).
 
-### 4. Generate and verify
+### 4. Wire setup install flow
+
+If the host should support `./setup --host myhost`, verify all of these in
+`setup`:
+
+- Host name is accepted in CLI parsing and error text.
+- Auto-detect sets an `INSTALL_*` flag when the host binary is on `PATH`.
+- Single-host mode sets the same `INSTALL_*` flag for `--host myhost`.
+- Setup generates host docs with `bun run gen:skill-docs --host myhost`.
+- Setup creates the global runtime root and links generated `gstack-*` skill dirs.
+
+Hosts that use a nonstandard local path, for example `.myhost/agent/skills`,
+must also keep `hostSubdir`, `localSkillRoot`, and `pathRewrites` aligned so
+generation, preambles, and install land in the same place.
+
+### 5. Generate and verify
 
 ```bash
 # Generate skill docs for the new host
@@ -119,6 +137,12 @@ ls .myhost/skills/gstack-*/SKILL.md
 grep -r ".claude/skills" .myhost/skills/ | head -5
 # (should be empty)
 
+# Validate host configs
+bun run scripts/host-config-export.ts validate
+
+# Verify the real install flow too
+./setup --host myhost
+
 # Generate for all hosts (includes the new one)
 bun run gen:skill-docs --host all
 
@@ -126,7 +150,7 @@ bun run gen:skill-docs --host all
 bun run skill:check
 ```
 
-### 5. Run tests
+### 6. Run tests
 
 ```bash
 bun test test/gen-skill-docs.test.ts
@@ -137,7 +161,7 @@ The parameterized smoke tests automatically pick up the new host. Zero test
 code to write. They verify: output exists, no path leakage, valid frontmatter,
 freshness check passes, codex skill excluded.
 
-### 6. Update README.md
+### 7. Update README.md
 
 Add install instructions for the new host in the appropriate section.
 
