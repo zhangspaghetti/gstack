@@ -40,6 +40,9 @@ log() { [ "$QUIET" -eq 0 ] && echo "$@" || true; }
 compiled_binary_exists() {
   [ -f "$1" ] || [ -f "$1.exe" ]
 }
+normalize_setup_arg() {
+  printf '%s' "$1" | sed -e 's/^[‐‑‒–—―−][‐‑‒–—―−]*/--/'
+}
 replace_managed_skill_target() {
   if [ -L "$1" ]; then
     rm -f "$1"
@@ -58,16 +61,17 @@ SKILL_PREFIX_FLAG=0
 TEAM_MODE=0
 NO_TEAM_MODE=0
 while [ $# -gt 0 ]; do
-  case "$1" in
+  arg="$(normalize_setup_arg "$1")"
+  case "$arg" in
     --host) [ -z "$2" ] && echo "Missing value for --host (expected claude, codex, kiro, factory, opencode, copilot, gsd, openclaw, hermes, gbrain, or auto)" >&2 && exit 1; HOST="$2"; shift 2 ;;
-    --host=*) HOST="${1#--host=}"; shift ;;
+    --host=*) HOST="${arg#--host=}"; shift ;;
     --local) LOCAL_INSTALL=1; shift ;;
     --prefix)    SKILL_PREFIX=1; SKILL_PREFIX_FLAG=1; shift ;;
     --no-prefix) SKILL_PREFIX=0; SKILL_PREFIX_FLAG=1; shift ;;
     --team)    TEAM_MODE=1; shift ;;
     --no-team) NO_TEAM_MODE=1; shift ;;
     -q|--quiet) QUIET=1; shift ;;
-    *) shift ;;
+    *) echo "Unknown option or argument: $1" >&2; exit 1 ;;
   esac
 done
 

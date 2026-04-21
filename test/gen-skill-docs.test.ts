@@ -2186,6 +2186,18 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('link_copilot_skill_dirs');
   });
 
+  test('setup normalizes Unicode dash variants in CLI flags', () => {
+    expect(setupContent).toContain('normalize_setup_arg()');
+    expect(setupContent).toContain("sed -e 's/^[‐‑‒–—―−][‐‑‒–—―−]*/--/'");
+    expect(setupContent).toContain('arg="$(normalize_setup_arg "$1")"');
+    expect(setupContent).toContain('HOST="${arg#--host=}"');
+  });
+
+  test('setup fails fast on unknown CLI arguments instead of silently ignoring them', () => {
+    expect(setupContent).toContain('Unknown option or argument: $1');
+    expect(setupContent).not.toContain('*) shift ;;');
+  });
+
   test('copilot and gsd relink logic replaces stale managed directories', () => {
     expect(setupContent).toContain('replace_managed_skill_target()');
     const copilotFnStart = setupContent.indexOf('link_copilot_skill_dirs()');
