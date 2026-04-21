@@ -134,6 +134,15 @@ async function callFresh(
 
   try {
     const response = await fetch(`${openaiBase()}/v1/responses`, {
+      method: "POST",
+      headers: {
+        "Authorization": `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: "gpt-4o",
+        input: prompt,
+        tools: [{ type: "image_generation", size: "1536x1024", quality: "high" }],
       }),
       signal: controller.signal,
     });
