@@ -545,6 +545,8 @@ describe('host config correctness', () => {
     expect(gsd.hostSubdir).toBe('.gsd/agent');
     expect(gsd.pathRewrites.some(r => r.from === '.claude/skills' && r.to === '.gsd/agent/skills')).toBe(true);
     expect(gsd.pathRewrites.some(r => r.from === '.claude/skills/review' && r.to === '.gsd/agent/skills/gstack/review')).toBe(true);
+    expect(gsd.suppressedResolvers).toContain('GBRAIN_CONTEXT_LOAD');
+    expect(gsd.suppressedResolvers).toContain('GBRAIN_SAVE_RESULTS');
     expect(gsd.runtimeRoot.globalSymlinks).toContain('browse/dist');
     expect(gsd.runtimeRoot.globalSymlinks).toContain('design/dist');
     expect(gsd.runtimeRoot.globalSymlinks).toContain('make-pdf/dist');
@@ -560,6 +562,8 @@ describe('host config correctness', () => {
     expect(copilot.localSkillRoot).toBe('.copilot/skills/gstack');
     expect(copilot.hostSubdir).toBe('.copilot');
     expect(copilot.pathRewrites.some(r => r.from === '.claude/skills' && r.to === '.copilot/skills')).toBe(true);
+    expect(copilot.suppressedResolvers).toContain('GBRAIN_CONTEXT_LOAD');
+    expect(copilot.suppressedResolvers).toContain('GBRAIN_SAVE_RESULTS');
     expect(copilot.runtimeRoot.globalSymlinks).toContain('design/dist');
     expect(copilot.runtimeRoot.globalSymlinks).toContain('make-pdf/dist');
     expect(copilot.runtimeRoot.globalSymlinks).toContain('review/specialists');

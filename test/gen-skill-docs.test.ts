@@ -2270,6 +2270,15 @@ describe('setup script validation', () => {
     expect(content).toContain('~/.gsd/agent/skills/gstack');
   });
 
+  test('generated GSD skills suppress GBrain-only instructions on non-brain hosts', () => {
+    Bun.spawnSync(['bun', 'run', 'scripts/gen-skill-docs.ts', '--host', 'gsd'], {
+      cwd: ROOT, stdout: 'pipe', stderr: 'pipe',
+    });
+    const content = fs.readFileSync(path.join(ROOT, '.gsd', 'agent', 'skills', 'gstack-investigate', 'SKILL.md'), 'utf-8');
+    expect(content).not.toContain('Before starting this skill, search your brain for relevant context:');
+    expect(content).not.toContain('gbrain put_page');
+  });
+
   test('generated Copilot preambles use .copilot/skills local fallback paths', () => {
     const copilotSkillDir = path.join(ROOT, '.copilot', 'skills', 'gstack-review');
     if (!fs.existsSync(copilotSkillDir)) {
@@ -2282,6 +2291,15 @@ describe('setup script validation', () => {
     expect(content).toContain('$_ROOT/.copilot/skills/gstack');
     expect(content).toContain('~/.copilot/skills/gstack');
     expect(content).not.toContain('$_ROOT/.github/skills/gstack');
+  });
+
+  test('generated Copilot skills suppress GBrain-only instructions on non-brain hosts', () => {
+    Bun.spawnSync(['bun', 'run', 'scripts/gen-skill-docs.ts', '--host', 'copilot'], {
+      cwd: ROOT, stdout: 'pipe', stderr: 'pipe',
+    });
+    const content = fs.readFileSync(path.join(ROOT, '.copilot', 'skills', 'gstack-investigate', 'SKILL.md'), 'utf-8');
+    expect(content).not.toContain('Before starting this skill, search your brain for relevant context:');
+    expect(content).not.toContain('gbrain put_page');
   });
 
   test('create_agents_sidecar links runtime assets', () => {
