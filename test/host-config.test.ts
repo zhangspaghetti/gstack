@@ -389,6 +389,23 @@ describe('host-config-export.ts CLI', () => {
     expect(lines).toContain('plan-devex-review/dx-hall-of-fame.md');
   });
 
+  test('gsd symlinks returns runtime root assets', () => {
+    const { stdout, exitCode } = run('symlinks', 'gsd');
+    expect(exitCode).toBe(0);
+    const lines = stdout.split('\n');
+    expect(lines).toContain('bin');
+    expect(lines).toContain('browse/dist');
+    expect(lines).toContain('browse/bin');
+    expect(lines).toContain('design/dist');
+    expect(lines).toContain('make-pdf/dist');
+    expect(lines).toContain('review/design-checklist.md');
+    expect(lines).toContain('review/greptile-triage.md');
+    expect(lines).toContain('review/specialists');
+    expect(lines).toContain('qa/templates');
+    expect(lines).toContain('qa/references');
+    expect(lines).toContain('plan-devex-review/dx-hall-of-fame.md');
+  });
+
   test('symlinks with missing host exits 1', () => {
     const { exitCode } = run('symlinks');
     expect(exitCode).toBe(1);
@@ -527,8 +544,13 @@ describe('host config correctness', () => {
     expect(gsd.localSkillRoot).toBe('.gsd/agent/skills/gstack');
     expect(gsd.hostSubdir).toBe('.gsd/agent');
     expect(gsd.pathRewrites.some(r => r.from === '.claude/skills' && r.to === '.gsd/agent/skills')).toBe(true);
+    expect(gsd.pathRewrites.some(r => r.from === '.claude/skills/review' && r.to === '.gsd/agent/skills/gstack/review')).toBe(true);
     expect(gsd.runtimeRoot.globalSymlinks).toContain('browse/dist');
+    expect(gsd.runtimeRoot.globalSymlinks).toContain('design/dist');
+    expect(gsd.runtimeRoot.globalSymlinks).toContain('make-pdf/dist');
     expect(gsd.runtimeRoot.globalSymlinks).toContain('review/specialists');
+    expect(gsd.runtimeRoot.globalSymlinks).toContain('qa/templates');
+    expect(gsd.runtimeRoot.globalSymlinks).toContain('plan-devex-review/dx-hall-of-fame.md');
     expect(gsd.runtimeRoot.globalFiles?.review).toContain('design-checklist.md');
     expect(gsd.runtimeRoot.globalFiles?.review).toContain('greptile-triage.md');
   });

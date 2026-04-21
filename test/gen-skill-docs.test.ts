@@ -2243,13 +2243,18 @@ describe('setup script validation', () => {
     expect(fnBody).toContain('dx-hall-of-fame.md');
   });
 
-  test('setup installs GSD review runtime assets used by /review', () => {
+  test('setup installs GSD runtime assets used by review, qa, design, and make-pdf', () => {
     const fnStart = setupContent.indexOf('create_gsd_runtime_root()');
     const fnEnd = setupContent.indexOf('}', setupContent.indexOf('ln -snf "$gstack_dir/ETHOS.md"', fnStart));
     const fnBody = setupContent.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('design/dist');
+    expect(fnBody).toContain('make-pdf/dist');
     expect(fnBody).toContain('design-checklist.md');
     expect(fnBody).toContain('greptile-triage.md');
     expect(fnBody).toContain('review/specialists');
+    expect(fnBody).toContain('qa/templates');
+    expect(fnBody).toContain('qa/references');
+    expect(fnBody).toContain('dx-hall-of-fame.md');
   });
 
   test('generated GSD preambles use .gsd/agent/skills local fallback paths', () => {

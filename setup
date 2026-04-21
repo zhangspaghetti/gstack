@@ -922,7 +922,7 @@ create_gsd_runtime_root() {
     rm -rf "$gsd_gstack"
   fi
 
-  mkdir -p "$gsd_gstack" "$gsd_gstack/browse" "$gsd_gstack/gstack-upgrade" "$gsd_gstack/review"
+  mkdir -p "$gsd_gstack" "$gsd_gstack/browse" "$gsd_gstack/design" "$gsd_gstack/make-pdf" "$gsd_gstack/gstack-upgrade" "$gsd_gstack/review" "$gsd_gstack/qa" "$gsd_gstack/plan-devex-review"
 
   if [ -f "$gsd_dir/gstack/SKILL.md" ]; then
     ln -snf "$gsd_dir/gstack/SKILL.md" "$gsd_gstack/SKILL.md"
@@ -936,6 +936,12 @@ create_gsd_runtime_root() {
   if [ -d "$gstack_dir/browse/bin" ]; then
     ln -snf "$gstack_dir/browse/bin" "$gsd_gstack/browse/bin"
   fi
+  if [ -d "$gstack_dir/design/dist" ]; then
+    ln -snf "$gstack_dir/design/dist" "$gsd_gstack/design/dist"
+  fi
+  if [ -d "$gstack_dir/make-pdf/dist" ]; then
+    ln -snf "$gstack_dir/make-pdf/dist" "$gsd_gstack/make-pdf/dist"
+  fi
   if [ -f "$gsd_dir/gstack-upgrade/SKILL.md" ]; then
     ln -snf "$gsd_dir/gstack-upgrade/SKILL.md" "$gsd_gstack/gstack-upgrade/SKILL.md"
   fi
@@ -946,6 +952,15 @@ create_gsd_runtime_root() {
   done
   if [ -d "$gstack_dir/review/specialists" ]; then
     ln -snf "$gstack_dir/review/specialists" "$gsd_gstack/review/specialists"
+  fi
+  if [ -d "$gstack_dir/qa/templates" ]; then
+    ln -snf "$gstack_dir/qa/templates" "$gsd_gstack/qa/templates"
+  fi
+  if [ -d "$gstack_dir/qa/references" ]; then
+    ln -snf "$gstack_dir/qa/references" "$gsd_gstack/qa/references"
+  fi
+  if [ -f "$gstack_dir/plan-devex-review/dx-hall-of-fame.md" ]; then
+    ln -snf "$gstack_dir/plan-devex-review/dx-hall-of-fame.md" "$gsd_gstack/plan-devex-review/dx-hall-of-fame.md"
   fi
   if [ -f "$gstack_dir/ETHOS.md" ]; then
     ln -snf "$gstack_dir/ETHOS.md" "$gsd_gstack/ETHOS.md"

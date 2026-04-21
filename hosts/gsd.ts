@@ -25,13 +25,13 @@ const gsd: HostConfig = {
   pathRewrites: [
     { from: '~/.claude/skills/gstack', to: '~/.gsd/agent/skills/gstack' },
     { from: '.claude/skills/gstack', to: '.gsd/agent/skills/gstack' },
-    { from: '~/.claude/skills/review', to: '~/.gsd/agent/skills/review' },
-    { from: '.claude/skills/review', to: '.gsd/agent/skills/review' },
+    { from: '~/.claude/skills/review', to: '~/.gsd/agent/skills/gstack/review' },
+    { from: '.claude/skills/review', to: '.gsd/agent/skills/gstack/review' },
     { from: '.claude/skills', to: '.gsd/agent/skills' },
   ],
 
   runtimeRoot: {
-    globalSymlinks: ['bin', 'browse/dist', 'browse/bin', 'gstack-upgrade', 'ETHOS.md', 'review/specialists'],
+    globalSymlinks: ['bin', 'browse/dist', 'browse/bin', 'design/dist', 'make-pdf/dist', 'gstack-upgrade', 'ETHOS.md', 'review/specialists', 'qa/templates', 'qa/references', 'plan-devex-review/dx-hall-of-fame.md'],
     globalFiles: { 'review': ['checklist.md', 'design-checklist.md', 'greptile-triage.md', 'TODOS-format.md'] },
   },
 
