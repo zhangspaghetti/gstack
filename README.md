@@ -113,6 +113,7 @@ Or target a specific agent with `./setup --host <name>`:
 
 | Agent | Flag | Skills install to |
 |-------|------|-------------------|
+| GitHub Copilot | `--host copilot` | `~/.copilot/skills/gstack-*/` |
 | OpenAI Codex CLI | `--host codex` | `~/.codex/skills/gstack-*/` |
 | GSD | `--host gsd` | `~/.gsd/agent/skills/gstack-*/` |
 | OpenCode | `--host opencode` | `~/.config/opencode/skills/gstack-*/` |

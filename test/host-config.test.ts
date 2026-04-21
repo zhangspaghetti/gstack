@@ -19,6 +19,7 @@ import {
   factory,
   kiro,
   opencode,
+  copilot,
   slate,
   cursor,
   openclaw,
@@ -371,6 +372,23 @@ describe('host-config-export.ts CLI', () => {
     expect(lines).toContain('plan-devex-review/dx-hall-of-fame.md');
   });
 
+  test('copilot symlinks returns runtime root assets', () => {
+    const { stdout, exitCode } = run('symlinks', 'copilot');
+    expect(exitCode).toBe(0);
+    const lines = stdout.split('\n');
+    expect(lines).toContain('bin');
+    expect(lines).toContain('browse/dist');
+    expect(lines).toContain('browse/bin');
+    expect(lines).toContain('design/dist');
+    expect(lines).toContain('make-pdf/dist');
+    expect(lines).toContain('review/design-checklist.md');
+    expect(lines).toContain('review/greptile-triage.md');
+    expect(lines).toContain('review/specialists');
+    expect(lines).toContain('qa/templates');
+    expect(lines).toContain('qa/references');
+    expect(lines).toContain('plan-devex-review/dx-hall-of-fame.md');
+  });
+
   test('symlinks with missing host exits 1', () => {
     const { exitCode } = run('symlinks');
     expect(exitCode).toBe(1);
@@ -513,6 +531,18 @@ describe('host config correctness', () => {
     expect(gsd.runtimeRoot.globalSymlinks).toContain('review/specialists');
     expect(gsd.runtimeRoot.globalFiles?.review).toContain('design-checklist.md');
     expect(gsd.runtimeRoot.globalFiles?.review).toContain('greptile-triage.md');
+  });
+
+  test('copilot keeps generator and runtime paths aligned under .copilot/skills', () => {
+    expect(copilot.globalRoot).toBe('.copilot/skills/gstack');
+    expect(copilot.localSkillRoot).toBe('.copilot/skills/gstack');
+    expect(copilot.hostSubdir).toBe('.copilot');
+    expect(copilot.pathRewrites.some(r => r.from === '.claude/skills' && r.to === '.copilot/skills')).toBe(true);
+    expect(copilot.runtimeRoot.globalSymlinks).toContain('design/dist');
+    expect(copilot.runtimeRoot.globalSymlinks).toContain('make-pdf/dist');
+    expect(copilot.runtimeRoot.globalSymlinks).toContain('review/specialists');
+    expect(copilot.runtimeRoot.globalSymlinks).toContain('qa/templates');
+    expect(copilot.runtimeRoot.globalSymlinks).toContain('plan-devex-review/dx-hall-of-fame.md');
   });
 
   test('openclaw includeSkills is empty (native skills replaced generated ones)', () => {

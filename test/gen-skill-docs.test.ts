@@ -2125,14 +2125,15 @@ describe('setup script validation', () => {
     expect(fnBody).toContain('rm -f "$target"');
   });
 
-  test('setup supports --host auto|claude|codex|kiro|factory|opencode|gsd', () => {
+  test('setup supports --host auto|claude|codex|kiro|factory|opencode|copilot|gsd', () => {
     expect(setupContent).toContain('--host');
     expect(setupContent).toContain('claude|codex|kiro|factory|opencode|copilot|gsd|auto');
   });
 
-  test('auto mode detects claude, codex, kiro, factory, opencode, and gsd binaries', () => {
+  test('auto mode detects claude, codex, copilot, kiro, factory, opencode, and gsd binaries', () => {
     expect(setupContent).toContain('command -v claude');
     expect(setupContent).toContain('command -v codex');
+    expect(setupContent).toContain('command -v copilot');
     expect(setupContent).toContain('command -v kiro-cli');
     expect(setupContent).toContain('command -v droid');
     expect(setupContent).toContain('command -v opencode');
@@ -2177,6 +2178,27 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('link_gsd_skill_dirs');
   });
 
+  test('setup supports --host copilot with a full runtime root', () => {
+    expect(setupContent).toContain('INSTALL_COPILOT=');
+    expect(setupContent).toContain('COPILOT_SKILLS="$HOME/.copilot/skills"');
+    expect(setupContent).toContain('COPILOT_GSTACK="$COPILOT_SKILLS/gstack"');
+    expect(setupContent).toContain('create_copilot_runtime_root');
+    expect(setupContent).toContain('link_copilot_skill_dirs');
+  });
+
+  test('copilot and gsd relink logic replaces stale managed directories', () => {
+    expect(setupContent).toContain('replace_managed_skill_target()');
+    const copilotFnStart = setupContent.indexOf('link_copilot_skill_dirs()');
+    const copilotFnEnd = setupContent.indexOf('}', setupContent.indexOf('linked[@]}', copilotFnStart));
+    const copilotFnBody = setupContent.slice(copilotFnStart, copilotFnEnd);
+    expect(copilotFnBody).toContain('replace_managed_skill_target "$target"');
+
+    const gsdFnStart = setupContent.indexOf('link_gsd_skill_dirs()');
+    const gsdFnEnd = setupContent.indexOf('}', setupContent.indexOf('linked[@]}', gsdFnStart));
+    const gsdFnBody = setupContent.slice(gsdFnStart, gsdFnEnd);
+    expect(gsdFnBody).toContain('replace_managed_skill_target "$target"');
+  });
+
   test('setup rebuild guard covers all compiled runtime binaries', () => {
     expect(setupContent).toContain('compiled_binary_exists()');
     expect(setupContent).toContain('browse/dist/find-browse');
@@ -2193,6 +2215,20 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('qa/templates');
     expect(setupContent).toContain('qa/references');
     expect(setupContent).toContain('dx-hall-of-fame.md');
+  });
+
+  test('setup installs Copilot runtime assets used by review, qa, design, and make-pdf', () => {
+    const fnStart = setupContent.indexOf('create_copilot_runtime_root()');
+    const fnEnd = setupContent.indexOf('}', setupContent.indexOf('ln -snf "$gstack_dir/ETHOS.md"', fnStart));
+    const fnBody = setupContent.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('design/dist');
+    expect(fnBody).toContain('make-pdf/dist');
+    expect(fnBody).toContain('design-checklist.md');
+    expect(fnBody).toContain('greptile-triage.md');
+    expect(fnBody).toContain('review/specialists');
+    expect(fnBody).toContain('qa/templates');
+    expect(fnBody).toContain('qa/references');
+    expect(fnBody).toContain('dx-hall-of-fame.md');
   });
 
   test('setup installs GSD review runtime assets used by /review', () => {
@@ -2215,6 +2251,20 @@ describe('setup script validation', () => {
     const content = fs.readFileSync(path.join(gsdSkillDir, 'SKILL.md'), 'utf-8');
     expect(content).toContain('$_ROOT/.gsd/agent/skills/gstack');
     expect(content).toContain('~/.gsd/agent/skills/gstack');
+  });
+
+  test('generated Copilot preambles use .copilot/skills local fallback paths', () => {
+    const copilotSkillDir = path.join(ROOT, '.copilot', 'skills', 'gstack-review');
+    if (!fs.existsSync(copilotSkillDir)) {
+      Bun.spawnSync(['bun', 'run', 'scripts/gen-skill-docs.ts', '--host', 'copilot'], {
+        cwd: ROOT, stdout: 'pipe', stderr: 'pipe',
+      });
+    }
+    expect(fs.existsSync(copilotSkillDir)).toBe(true);
+    const content = fs.readFileSync(path.join(copilotSkillDir, 'SKILL.md'), 'utf-8');
+    expect(content).toContain('$_ROOT/.copilot/skills/gstack');
+    expect(content).toContain('~/.copilot/skills/gstack');
+    expect(content).not.toContain('$_ROOT/.github/skills/gstack');
   });
 
   test('create_agents_sidecar links runtime assets', () => {

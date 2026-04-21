@@ -7,7 +7,7 @@ const copilot: HostConfig = {
   cliAliases: [],
 
   globalRoot: '.copilot/skills/gstack',
-  localSkillRoot: '.github/skills/gstack',
+  localSkillRoot: '.copilot/skills/gstack',
   hostSubdir: '.copilot',
   usesEnvVars: true,
 
@@ -30,8 +30,8 @@ const copilot: HostConfig = {
   ],
 
   runtimeRoot: {
-    globalSymlinks: ['bin', 'browse/dist', 'browse/bin', 'gstack-upgrade', 'ETHOS.md'],
-    globalFiles: { 'review': ['checklist.md', 'TODOS-format.md'] },
+    globalSymlinks: ['bin', 'browse/dist', 'browse/bin', 'design/dist', 'make-pdf/dist', 'gstack-upgrade', 'ETHOS.md', 'review/specialists', 'qa/templates', 'qa/references', 'plan-devex-review/dx-hall-of-fame.md'],
+    globalFiles: { 'review': ['checklist.md', 'design-checklist.md', 'greptile-triage.md', 'TODOS-format.md'] },
   },
 
   install: {
