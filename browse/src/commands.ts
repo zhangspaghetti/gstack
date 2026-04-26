@@ -52,6 +52,27 @@ export const PAGE_CONTENT_COMMANDS = new Set([
   'console', 'dialog',
   'media', 'data',
   'ux-audit',
+  // snapshot emits aria tree with attacker-controlled aria-label strings.
+  // The sidebar's system prompt pushes agents to run `$B snapshot` as the
+  // primary read path, so unwrapped snapshot output is the biggest ingress
+  // for indirect prompt injection. Envelope it like every other read.
+  'snapshot',
+]);
+
+/**
+ * Subset of PAGE_CONTENT_COMMANDS whose output is derived from the
+ * live page DOM. These channels can carry hidden elements or
+ * ARIA-injection payloads that the centralized envelope wrap alone
+ * does not neutralize, so the scoped-token pipeline runs
+ * `markHiddenElements` on the page before the read and surfaces any
+ * hits as CONTENT WARNINGS to the LLM.
+ *
+ * `console`, `dialog` intentionally excluded — they read separate
+ * runtime state (console capture, dialog events), not the DOM tree.
+ */
+export const DOM_CONTENT_COMMANDS = new Set([
+  'text', 'html', 'links', 'forms', 'accessibility', 'attrs',
+  'media', 'data', 'ux-audit',
 ]);
 
 /** Wrap output from untrusted-content commands with trust boundary markers */

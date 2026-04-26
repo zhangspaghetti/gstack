@@ -26,6 +26,26 @@ bun run slop:diff     # slop findings in files changed on this branch only
 
 `test:evals` requires `ANTHROPIC_API_KEY`. Codex E2E tests (`test/codex-e2e.test.ts`)
 use Codex's own auth from `~/.codex/` config — no `GSTACK_OPENAI_API_KEY` env var needed.
+
+**Where the keys live on this machine.** Conductor workspaces don't inherit the
+user's interactive shell env, so `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` aren't
+in the default process env. Before running any paid eval / E2E, source them from
+`~/.zshrc` (that's where Garry keeps them):
+
+```bash
+bash -c '
+  eval "$(grep -E "^export (ANTHROPIC_API_KEY|OPENAI_API_KEY)=" ~/.zshrc)"
+  export ANTHROPIC_API_KEY OPENAI_API_KEY
+  EVALS=1 EVALS_TIER=periodic bun test test/skill-e2e-<whatever>.test.ts
+'
+```
+
+Do not echo the key value anywhere (stdout, logs, shell history). The grep+eval
+pattern keeps it in process env only. When passing to a test's Agent SDK, do NOT
+pass `env: {...}` to `runAgentSdkTest` — the SDK's auth pipeline doesn't pick up
+the key the same way when env is supplied as an object (confirmed failure mode).
+Instead, mutate `process.env.ANTHROPIC_API_KEY` ambiently before the call and
+restore in `finally`.
 E2E tests stream progress in real-time (tool-by-tool via `--output-format stream-json
 --verbose`). Results are persisted to `~/.gstack-dev/evals/` with auto-comparison
 against the previous run.
@@ -212,6 +232,61 @@ failure modes. The sidebar spans 5 files across 2 codebases (extension + server)
 with non-obvious ordering dependencies. The doc exists to prevent the kind of
 silent failures that come from not understanding the cross-component flow.
 
+**Transport-layer security** (v1.6.0.0+). When `pair-agent` starts an ngrok tunnel,
+the daemon binds two HTTP listeners: a local listener (127.0.0.1, full command
+surface, never forwarded) and a tunnel listener (locked allowlist: `/connect`,
+`/command` with a scoped token + 17-command browser-driving allowlist,
+`/sidebar-chat`). ngrok forwards only the tunnel port. Root tokens over the tunnel
+return 403. SSE endpoints use a 30-minute HttpOnly `gstack_sse` cookie minted via
+`POST /sse-session` (never valid against `/command`). Tunnel-surface rejections go
+to `~/.gstack/security/attempts.jsonl` via `tunnel-denial-log.ts`. Before editing
+`server.ts`, `sse-session-cookie.ts`, or `tunnel-denial-log.ts`, read
+[ARCHITECTURE.md](ARCHITECTURE.md#dual-listener-tunnel-architecture-v1600) —
+the module boundary (no imports from `token-registry.ts` into `sse-session-cookie.ts`)
+is load-bearing for scope isolation.
+
+**Sidebar security stack** (layered defense against prompt injection):
+
+| Layer | Module | Lives in |
+|-------|--------|----------|
+| L1-L3 | `content-security.ts` | both server and agent — datamarking, hidden element strip, ARIA regex, URL blocklist, envelope wrapping |
+| L4 | `security-classifier.ts` (TestSavantAI ONNX) | **sidebar-agent only** |
+| L4b | `security-classifier.ts` (Claude Haiku transcript) | **sidebar-agent only** |
+| L5 | `security.ts` (canary) | both — inject in compiled, check in agent |
+| L6 | `security.ts` (combineVerdict ensemble) | both |
+
+**Critical constraint:** `security-classifier.ts` CANNOT be imported from the
+compiled browse binary. `@huggingface/transformers` v4 requires `onnxruntime-node`
+which fails to `dlopen` from Bun compile's temp extract dir. Only `security.ts`
+(pure-string operations — canary, verdict combiner, attack log, status) is safe
+for `server.ts`. See `~/.gstack/projects/garrytan-gstack/ceo-plans/2026-04-19-prompt-injection-guard.md`
+§"Pre-Impl Gate 1 Outcome" for full architectural decision.
+
+**Thresholds** (in `security.ts`):
+- `BLOCK: 0.85` — single-layer score that would cause BLOCK if cross-confirmed
+- `WARN: 0.60` — cross-confirm threshold. When L4 AND L4b both >= 0.60 → BLOCK
+- `LOG_ONLY: 0.40` — gates transcript classifier (skip Haiku when all layers < 0.40)
+
+**Ensemble rule:** BLOCK only when the ML content classifier AND the transcript
+classifier both report >= WARN. Single-layer high confidence degrades to WARN —
+this is the Stack Overflow instruction-writing FP mitigation. Canary leak
+always BLOCKs (deterministic).
+
+**Env knobs:**
+- `GSTACK_SECURITY_OFF=1` — emergency kill switch. Classifier stays off even if
+  warmed. Canary is still injected; just the ML scan is skipped.
+- `GSTACK_SECURITY_ENSEMBLE=deberta` — opt-in DeBERTa-v3 ensemble. Adds
+  ProtectAI DeBERTa-v3-base-injection-onnx as L4c classifier for cross-model
+  agreement. 721MB first-run download. With ensemble enabled, BLOCK requires
+  2-of-3 ML classifiers agreeing at >= WARN (testsavant, deberta, transcript).
+  Without ensemble (default), BLOCK requires testsavant + transcript at >= WARN.
+- Classifier model cache: `~/.gstack/models/testsavant-small/` (112MB, first run only)
+  plus `~/.gstack/models/deberta-v3-injection/` (721MB, only when ensemble enabled)
+- Attack log: `~/.gstack/security/attempts.jsonl` (salted sha256 + domain only,
+  rotates at 10MB, 5 generations)
+- Per-device salt: `~/.gstack/security/device-salt` (0600)
+- Session state: `~/.gstack/security/session-state.json` (cross-process, atomic)
+
 ## Dev symlink awareness
 
 When developing gstack, `.claude/skills/gstack` may be a symlink back to this
@@ -352,6 +427,16 @@ No auto-merging. No "I'll just clean this up."
 
 ## CHANGELOG + VERSION style
 
+**Versioning invariant (workspace-aware ship).** VERSION is a monotonic ordered
+release identifier, not a strict semver commitment. The bump level
+(major/minor/patch/micro) expresses intent at ship time. Queue-advancing past a
+claimed version within the same bump level is explicitly permitted — if branch A
+claims v1.7.0.0 as a MINOR and branch B is also a MINOR, B lands at v1.8.0.0
+(still a MINOR relative to main). Downstream consumers must NOT rely on
+"MINOR = feature-only, PATCH = fix-only" as a strict contract. This is why
+`bin/gstack-next-version` advances within the chosen bump level rather than
+repicking the level when collisions happen.
+
 **VERSION and CHANGELOG are branch-scoped.** Every feature branch that ships gets its
 own version bump and CHANGELOG entry. The entry describes what THIS branch adds —
 not what was already on main.
@@ -382,9 +467,18 @@ already landed on main. Your entry goes on top because your branch lands next.
 If any answer is no, fix it before continuing.
 
 **After any CHANGELOG edit that moves, adds, or removes entries,** immediately run
-`grep "^## \[" CHANGELOG.md` and verify the full version sequence is contiguous
-with no gaps or duplicates before committing. If a version is missing, the edit
-broke something. Fix it before moving on.
+`grep "^## \[" CHANGELOG.md` to verify no duplicates and a sensible reverse-chronological
+order. Gaps between version numbers are fine. A branch that ships at v1.6.4.0 without
+a prior v1.5.2.0 or v1.5.3.0 entry on main is correct — those were branch-internal
+version numbers that never landed. Do not back-fill gaps with placeholder entries.
+
+**Never orphan branch-internal versions.** If your branch bumped VERSION several times
+during development (v1.5.1.0 → v1.5.2.0 → v1.6.4.0, say) and those earlier entries were
+never released to main, the final ship consolidates ALL of them into a single entry at
+the final version (v1.6.4.0). Collapse them — delete the old entries and move their
+content into the final entry, re-version table columns accordingly. Readers see one
+release, not a branch diary. Gaps are fine (v1.6.3.0 → v1.6.4.0 with no v1.5.x
+in between on main is correct).
 
 CHANGELOG.md is **for users**, not contributors. Write it like product release notes:
 
@@ -396,6 +490,22 @@ CHANGELOG.md is **for users**, not contributors. Write it like product release n
 - Every entry should make someone think "oh nice, I want to try that."
 - No jargon: say "every question now tells you which project and branch you're in" not
   "AskUserQuestion format standardized across skill templates via preamble resolver."
+
+**Only document what shipped between main and this change.** Readers do not care how
+we got here. Keep out of the CHANGELOG, always:
+
+- Branch resyncs, merge commits with main, rebase activity.
+- Plan approvals, review outcomes (CEO / eng / design / outside-voice / codex findings),
+  AskUserQuestion decisions, scope negotiations.
+- "Work queued," "plan approved," "in-progress," "will ship later" — the CHANGELOG
+  documents what DID ship, not what MIGHT ship.
+- Version-bump housekeeping when no user-facing work actually landed.
+
+If the diff between the base branch version and this version has no user-facing change
+(only merges, only CHANGELOG edits, only placeholder work), the honest entry is one
+sentence: "Version bump for branch-ahead discipline. No user-facing changes yet." Stop
+there. Do not pad. Do not explain the plan that will ship eventually. Do not narrate
+the branch's history. When real work lands, the entry will replace this at /ship time.
 
 ### Release-summary format (every `## [X.Y.Z]` entry)
 
