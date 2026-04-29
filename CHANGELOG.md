@@ -1,5 +1,342 @@
 # Changelog
 
+## [1.20.0.0] - 2026-04-28
+
+## **Browser-skills land. `/scrape <intent>` first call drives the page; second call runs the codified script in 200ms.**
+
+Browser-skills are deterministic Playwright scripts that run as standalone Bun processes via `$B skill run`. They live in three storage tiers (project > global > bundled), get a per-spawn scoped capability token, and ship with `_lib/browse-client.ts` so each skill is fully self-contained. The bundled reference is `hackernews-frontpage` — try `$B skill run hackernews-frontpage` and you get the HN front page as JSON in 200ms.
+
+The agent authors them. `/scrape <intent>` is the single entry point for pulling page data — it matches existing skills via the `triggers:` array on first call, or drives `$B goto`/`$B html`/etc. on a brand-new intent and returns JSON. After a successful prototype, `/skillify` codifies the flow: it walks back through the conversation, extracts the final-attempt `$B` calls (no failed selectors, no chat fragments), synthesizes `script.ts` + `script.test.ts` + a captured fixture, stages everything to `~/.gstack/.tmp/skillify-<spawnId>/`, runs the test there, and asks before renaming into the final tier path. Test failure or rejection: `rm -rf` the temp dir, no half-written skill ever appears in `$B skill list`. Next `/scrape` with a matching intent routes via `$B skill list` + `$B skill run <name>`. ~30s prototype becomes ~200ms forever after.
+
+Mutating-flow sibling `/automate` is tracked as P0 in `TODOS.md` for the next release. Scraping is the safer wedge to validate the skillify pattern (failure mode: wrong data); mutating actions need the per-step confirmation gate that `/automate` adds on top.
+
+The architecture sidesteps the in-daemon isolation problem by running skill scripts *outside* the daemon as standalone Bun processes. Each script gets a per-spawn scoped capability token bound to the read+write command surface; the daemon root token never leaves the harness. Two token policies share the same registry but enforce independently: `tabPolicy: 'shared'` (default for skill spawns) is permissive on tab access — a skill can drive any tab, gated only by scope checks and rate limits. `tabPolicy: 'own-only'` (pair-agent over the ngrok tunnel) is strict — the token can only access tabs it owns, must `newtab` first to get a tab to drive, can't reach the user's natural tabs. Trust boundaries are at the daemon, not in process-side env scrubbing.
+
+### What you can now do
+
+- **Run a bundled skill:** `$B skill run hackernews-frontpage` returns JSON.
+- **Scrape with one verb:** `/scrape latest hacker news stories`. First call matches the bundled skill via the `triggers:` array and runs in 200ms. New intent? It prototypes via `$B`, returns JSON, and suggests `/skillify`.
+- **Codify a prototype:** `/skillify` walks back through the conversation, finds the last `/scrape` result, synthesizes the script + test + fixture, stages to a temp dir, runs the test, and asks before committing to `~/.gstack/browser-skills/<name>/`.
+- **List what's available:** `$B skill list` walks three tiers (project > global > bundled) and prints the resolved tier inline.
+- **Test a skill against a fixture:** `$B skill test hackernews-frontpage` runs the bundled `script.test.ts` against a captured HTML snapshot, no live network.
+- **Read a skill's contract:** `$B skill show hackernews-frontpage` prints SKILL.md.
+- **Tombstone a user-tier skill:** `$B skill rm <name> [--global]` moves it to `.tombstones/<name>-<ts>/`. Bundled skills are read-only.
+
+### The numbers that matter
+
+Source: 155 unit assertions across `browse/test/{skill-token,browse-client,browser-skills-storage,browser-skill-commands,browser-skill-write,tab-isolation,server-auth}.test.ts`, `browser-skills/hackernews-frontpage/script.test.ts`, and `test/skill-validation.test.ts`. Plus 5 gate-tier E2E scenarios in `test/skill-e2e-skillify.test.ts`. All free-tier tests pass in under two seconds; the gate-tier E2E adds ~$5 to a CI run.
+
+| Surface | Shape |
+|---|---|
+| Latency on a codified intent | ~200ms (vs ~30s prototype on first call) |
+| New `$B` command | `skill` (5 subcommands: list, show, run, test, rm) |
+| New gstack skills | 2 (`/scrape`, `/skillify`); `/automate` tracked as P0 in TODOS |
+| New modules | 5 (`browse-client.ts`, `browser-skills.ts`, `browser-skill-commands.ts`, `skill-token.ts`, `browser-skill-write.ts`) |
+| Bundled reference skills | 1 (`hackernews-frontpage`) |
+| Storage tiers | 3 (project > global > bundled, first-wins) |
+| SDK distribution model | sibling-file: each skill ships `_lib/browse-client.ts` (~3KB, byte-identical to canonical) |
+| Daemon-side capability default | scoped session token, `read+write` only (no `eval`/`js`/`cookies`/`storage`) |
+| Process-side env default | scrubbed: drops $HOME, $PATH user-paths, anything matching TOKEN/KEY/SECRET, AWS_*, OPENAI_*, GITHUB_*, etc. |
+| Tab access policy | `'shared'` (skill spawns) = permissive, gated by scope only. `'own-only'` (pair-agent tunnel) = strict ownership for every read + write. |
+| Atomic-write contract | temp-dir-then-rename via `browse/src/browser-skill-write.ts`. Test fail OR approval reject = `rm -rf` the temp dir. Never a half-written skill on disk. |
+
+### What this means for builders
+
+The compounding loop is closed. The first time you ask the agent to scrape a page, it pays the prototype cost. The second time on the same intent (rephrased or not), it runs the codified script in 200ms. Multiply across every recurring data-pull task you have, release-notes scraping, leaderboard checks, dashboard captures, and the time savings compound across sessions.
+
+The agent-authoring contract is tight: `/skillify` extracts only the final-attempt `$B` calls from the conversation (no failed selectors, no chat fragments leak into the on-disk artifact), writes to a temp dir, runs the auto-generated `script.test.ts` there, and only commits on test pass + your approval. If anything fails, the temp dir vanishes, no broken skill ever appears in `$B skill list`.
+
+Mutating flows (form fills, click sequences, multi-step automations) ship next as `/automate` (P0 in `TODOS.md`). Same skillify machinery, different trust profile: per-mutating-step confirmation gate when running non-codified, unattended once committed. Scraping's failure mode is benign (wrong data) and mutation's isn't (unintended writes); the staged rollout validates the skillify pattern with the safer half first.
+
+Pair-agent operators get the same isolation guarantees they had before. The dual-listener tunnel architecture is intact: a remote agent over ngrok can't read or write tabs the local user is using. Tunnel tokens get `tabPolicy: 'own-only'`, must `newtab` first to drive a tab, and only the 26-command tunnel allowlist is reachable.
+
+### Itemized changes
+
+#### Added — `$B skill` runtime
+
+- `$B skill list|show|run|test|rm <name?>`. Five subcommands. List walks 3 tiers (project > global > bundled) and prints the resolved tier inline so "why did it run that one?" is never a debugging mystery. Run mints a per-spawn scoped capability token, spawns `bun run script.ts -- <args>` with cwd locked to the skill dir, captures stdout (1MB cap) and stderr, and revokes the token on exit.
+- `browse/src/browse-client.ts`. Canonical SDK (~250 LOC). Reads `GSTACK_PORT` + `GSTACK_SKILL_TOKEN` from env first (set by `$B skill run`), falls back to `<project>/.gstack/browse.json` for standalone debug runs. Convenience methods cover the read+write surface: goto, click, fill, text, html, snapshot, links, forms, accessibility, attrs, media, data, scroll, press, type, select, wait, hover, screenshot. Low-level `command(cmd, args)` escape hatch for anything else.
+- `browse/src/browser-skills.ts`. Three-tier storage helpers. `listBrowserSkills()` walks project > global > bundled (first-wins), parses SKILL.md frontmatter, no INDEX.json. `readBrowserSkill(name)` does the same for a single name. `tombstoneBrowserSkill(name, tier)` moves a skill into `.tombstones/<name>-<ts>/` for recoverability.
+- `browse/src/skill-token.ts`. Wraps `token-registry.createToken/revokeToken` with skill-specific clientId encoding (`skill:<name>:<spawn-id>`), read+write defaults, and `tabPolicy: 'shared'`. TTL = spawn timeout + 30s slack.
+- `browser-skills/hackernews-frontpage/`. Bundled reference skill (SKILL.md, script.ts, _lib/browse-client.ts, fixtures/hn-2026-04-26.html, script.test.ts). Smallest interesting browser-skill: scrapes HN front page, returns 30 stories as JSON, no auth, stable HTML.
+
+#### Added — `/scrape` + `/skillify` gstack skills
+
+- `scrape/SKILL.md.tmpl` + generated `scrape/SKILL.md`. `/scrape <intent>` is one entry point with three paths: match (intent matches an existing skill's `triggers:` → `$B skill run <name>` in 200ms), prototype (drive `$B` primitives, return JSON, suggest `/skillify`), refusal (mutating intents route to `/automate`). Match decision lives in the agent, not the daemon, no new code in `browse/src/`, no expanded daemon command surface.
+- `skillify/SKILL.md.tmpl` + generated `skillify/SKILL.md`. 11-step flow: provenance guard (walk back ≤10 turns for a bounded `/scrape` result, refuse if cold), name + tier + trigger proposal via `AskUserQuestion`, synthesize `script.ts` from final-attempt `$B` calls only, capture fixture, write `script.test.ts`, copy canonical SDK byte-identical to `_lib/browse-client.ts`, write SKILL.md frontmatter (`source: agent`, `trusted: false`), stage to temp dir, run `$B skill test`, approval gate, atomic rename to final tier path.
+- `browse/src/browser-skill-write.ts`. Atomic-write helper. `stageSkill()` writes files to `~/.gstack/.tmp/skillify-<spawnId>/<name>/` with restrictive perms. `commitSkill()` does an atomic `fs.renameSync` into the final tier path with `realpath`/`lstat` discipline (refuses to follow symlinked staging dirs, refuses to clobber existing skills). `discardStaged()` is the cleanup path for test failures and approval rejections. `rm -rf` is idempotent and bounded to the per-spawn wrapper. `validateSkillName()` enforces lowercase letters/digits/dashes only, no `..` or path-escape characters.
+
+#### Trust model — scoped tokens
+
+Every spawned skill gets its own scoped token. The shape:
+
+- **Capability scope.** Read + write only by default. No `eval`, `js`, `cookies`, `storage`. Single-use clientId encodes skill name + spawn id. Revoked when the spawn exits or times out (TTL = timeout + 30s slack).
+- **Process env.** `trusted: true` frontmatter passes `process.env` minus `GSTACK_TOKEN`. `trusted: false` (default) drops everything except a minimal allowlist (LANG, LC_ALL, TERM, TZ) and pattern-strips secrets (TOKEN/KEY/SECRET/PASSWORD/AWS_*/ANTHROPIC_*/OPENAI_*/GITHUB_*).
+- **Tab access policy.** `tabPolicy: 'shared'` (skill spawns, default scoped clients): permissive, can read or write any tab, gated only by scope checks + rate limits. `tabPolicy: 'own-only'` (pair-agent over the tunnel): strict, the token can only access tabs it owns. The two policies enforce independently in `browser-manager.ts:checkTabAccess`. The capability gate already constrains what shared tokens can do; tab ownership only matters for pair-agent isolation.
+
+#### Changed
+
+- `browse/src/commands.ts` registers `skill` as a META command.
+- `browse/src/server.ts` threads the local listen port (`LOCAL_LISTEN_PORT`) to meta-command dispatch so `$B skill run` knows which port to point spawned scripts at. The tab-ownership gate predicate at the dispatcher fires for `tabPolicy === 'own-only'` only; shared tokens skip it.
+- `browse/src/browser-manager.ts:checkTabAccess` keys on `options.ownOnly`. Shared tokens and root pass unconditionally; own-only tokens require ownership for every read and write.
+- `browse/src/meta-commands.ts` dispatches `skill` to `handleSkillCommand`.
+- `BROWSER.md` rewritten to a complete reference: 1,299 lines, 26 sections covering the productivity loop, browser-skills runtime, domain-skills, pair-agent dual-listener, sidebar agent + terminal PTY, security stack L1-L6, full source map.
+- `docs/designs/BROWSER_SKILLS_V1.md` adds the design for the productivity loop's four contracts (provenance guard, synthesis input slice, atomic write, full test coverage). Phase table organized into 1, 2a, 2b, 3, 4.
+- `TODOS.md` lists `/automate` as P0 above the existing `PACING_UPDATES_V0` entry.
+
+#### Tests
+
+- `browse/test/browser-skill-write.test.ts` — 34 assertions covering the atomic-write contract: stage validation, file-path escape rejection, atomic rename, clobber refusal, symlink refusal, idempotent discard, end-to-end happy + failure paths.
+- `browse/test/tab-isolation.test.ts` — 9 assertions on `checkTabAccess` with explicit shared-vs-own-only coverage: shared agents can read/write any tab; own-only agents can only access their own claimed tabs.
+- `browse/test/server-auth.test.ts` — source-shape regression that fails if a future refactor reintroduces `WRITE_COMMANDS.has(command) ||` into the tab-ownership gate predicate.
+- `test/skill-validation.test.ts` extends to cover bundled browser-skills: each must have SKILL.md + script.ts + _lib/browse-client.ts (byte-identical to canonical) + script.test.ts, with frontmatter satisfying the host/triggers/args contract.
+- `test/skill-e2e-skillify.test.ts` — 5 gate-tier E2E scenarios (`claude -p` driven, deterministic against local file:// fixtures): match path routes to bundled skill, prototype path drives `$B` and emits JSON, skillify happy writes complete skill tree, provenance refusal leaves nothing on disk, approval-gate reject removes the temp dir.
+- `test/helpers/touchfiles.ts` registers all 5 new E2E entries with deps on `scrape/**`, `skillify/**`, `browse/src/browser-skill-write.ts`, plus the runtime modules.
+
+#### For contributors
+
+- The browser-skill SKILL.md frontmatter has a hard contract enforced by `parseSkillFile()` and `test/skill-validation.test.ts`. Required: `host` (string), `triggers` (string list), `args` (mapping list). Optional: `trusted` (bool, defaults false), `version`, `source` (`human`/`agent`), `description`.
+- The canonical SDK at `browse/src/browse-client.ts` and the sibling at `browser-skills/hackernews-frontpage/_lib/browse-client.ts` MUST be byte-identical. The skill-validation test fails the build otherwise. When the canonical SDK changes, update every bundled skill's `_lib/` copy. Agent-authored skills via `/skillify` get a freshly-copied SDK at synthesis time, so they're frozen at the version they were authored against (no drift possible).
+- The atomic-write helper enforces "no half-written skills." Always call `stageSkill` → run tests → `commitSkill` (success) OR `discardStaged` (failure). Never write directly to the final tier path. The helper's `validateSkillName` is the only naming gate, keep it tight (lowercase letters/digits/dashes, ≤64 chars, no consecutive dashes, no leading digit).
+- `checkTabAccess` policy: `ownOnly` is the only signal that constrains access. `isWrite` stays in the signature for callers that want to log or branch elsewhere, but doesn't gate the decision. Adding new policy axes (e.g., per-skill tab quotas) belongs in `docs/designs/`, not as a sneaky `isWrite` overload.
+- `/automate` and the Phase 4 follow-ups (Bun runtime distribution, OS FS sandbox, fixture-staleness detection) are tracked in `docs/designs/BROWSER_SKILLS_V1.md` and `TODOS.md`. The `/automate` skill reuses `/skillify` and `browser-skill-write.ts` as-is; new code is the per-mutating-step confirmation gate.
+
+## [1.17.0.0] - 2026-04-26
+
+## **Your gstack memory now actually lives in gbrain.**
+
+For everyone who ran `/setup-gbrain` in the last month and noticed `gbrain search` couldn't find their CEO plans, learnings, or retros: that's because Step 7 wrote a placeholder `consumers.json` with `status: "pending"` and called it done. The HTTP endpoint that placeholder pointed at was never built on the gbrain side. This release scraps that approach and uses the gbrain v0.18.0 federation surface (`gbrain sources` + `gbrain sync`) instead.
+
+After upgrading, `/setup-gbrain` adds a `git worktree` of your brain repo, registers it as a federated source on your gbrain (Supabase or PGLite), and runs an initial sync. Subsequent gstack skill end-of-run cycles also run `gbrain sync` so new artifacts land in the index automatically. Local-Mac only. No cloud agent required. `/gstack-upgrade` runs a one-shot migration for existing users.
+
+### Verify after upgrade
+
+```bash
+gbrain sources list --json | jq '.sources[] | {id, page_count, federated}'
+# Expect: two entries, your default brain plus a "gstack-brain-{user}"
+# entry, both federated=true.
+
+gbrain search "ethos" --source gstack-brain-{user} | head -5
+# Expect: hits from your gstack repo content (readme, ethos, designs, etc).
+```
+
+### What shipped
+
+`bin/gstack-gbrain-source-wireup` is the new helper. It derives a per-user source id from `~/.gstack/.git`'s origin URL (with multi-fallback to `~/.gstack-brain-remote.txt` and a `--source-id` flag), creates a detached `git worktree` at `~/.gstack-brain-worktree/`, registers it as a federated source on gbrain, runs initial backfill, and supports `--strict` (Step 7 strictness), `--uninstall` (full teardown including future-launchd plist), and `--probe` (read-only state inspection). All idempotent. The helper depends on `jq` (transitive via `gstack-gbrain-detect`).
+
+The helper locks the database URL at startup (precedence: `--database-url` flag > `GBRAIN_DATABASE_URL`/`DATABASE_URL` env > read once from `~/.gbrain/config.json`) and exports it as `GBRAIN_DATABASE_URL` for every child `gbrain` invocation. This means external rewrites of `~/.gbrain/config.json` mid-sync (e.g., a concurrent `gbrain init --non-interactive` running in another workspace) cannot redirect the wireup at a different brain. Per gbrain's `loadConfig()`, env-var URLs override the file. Step 7 of `/setup-gbrain` reads the URL out of `config.json` once and passes it explicitly via `--database-url`, so the wireup is robust against config flips during the seconds-to-minutes sync window.
+
+`/setup-gbrain` Step 7 now invokes the helper with `--strict` after `gstack-brain-init`. `/gstack-upgrade` invokes the helper without `--strict` via `gstack-upgrade/migrations/v1.12.3.0.sh` so missing/old gbrain is a benign skip during batch upgrade. `bin/gstack-brain-restore` invokes the helper after the initial clone so a 2nd Mac gets the wireup automatically. `bin/gstack-brain-uninstall` invokes `--uninstall` plus removes legacy `consumers.json`.
+
+`bin/gstack-brain-init` drops 60 lines of dead consumer-registration code (the HTTP POST block, the `consumers.json` writer, the chore commit). `bin/gstack-brain-restore` drops the 18-line `consumers.json` token-rehydration block (the only consumer that used it never had real tokens). `bin/gstack-brain-consumer` is marked deprecated in its header docstring; removal in v1.18.0.0 after one cycle of grace.
+
+`test/gstack-gbrain-source-wireup.test.ts` is new: 13 unit tests with a fake `gbrain` binary on `$PATH` covering fresh-state registration, idempotent re-runs, drift recovery (gbrain has no `sources update`, only `remove + add`), `--strict` failure modes, source-id fallback chain (`.git` → remote-file → flag), `--probe` non-mutation, sync errors, and `--uninstall`.
+
+### The numbers that matter
+
+These are reproducible on any machine after upgrade. Run the verify commands above to see your own delta.
+
+| Metric | Before (v1.16.0.0) | After (v1.17.0.0) |
+|---|---|---|
+| `gbrain sources list` size | 1 (default `/data/brain`) | 2 (default + `gstack-brain-{user}`) |
+| `consumers.json` status | `"pending"`, ingest_url `""` | file deleted from new installs |
+| Manual steps to wire up | 4 (clone + sources add + sync + cron) | 0, automatic in Step 7 |
+| Helper test coverage | 0 unit tests | 13 unit tests (`bun test test/gstack-gbrain-source-wireup.test.ts`) |
+| `bin/gstack-brain-init` size | 363 lines | 300 lines (60 lines of dead code removed) |
+
+Local Mac is the producer of artifacts and the worktree advances automatically with `~/.gstack/`'s commits. Cross-machine sync runs through GitHub via the existing `gstack-brain-sync --once` push hook. No new cron infrastructure needed today; when gbrain v0.21 code-graph features ship, the helper's `--enable-cron` flag is a clean extension.
+
+### What this means for builders
+
+Your gstack memory is searchable now. Run a CEO plan review or office-hours session, sync runs at skill-end automatically, and `gbrain search` finds the plan content from any gbrain client (this Claude Code session, future Macs, optional cloud agents like OpenClaw). One source of truth across machines. The placeholder is dead.
+
+### For contributors
+
+- `bin/gstack-brain-consumer` is deprecated in this release; removal in v1.18.0.0.
+- The `gbrain_url` and `gbrain_token` config keys are now no-ops. They remain readable for one cycle for back-compat, removed in v1.18.0.0.
+- Three pre-existing test failures on this branch (`gstack-config gbrain keys > GSTACK_HOME overrides real config dir`, `no compiled binaries in git > git tracks no files larger than 2MB`, `Opus 4.7 overlay — pacing directive`) were verified to fail on the base branch too. Out of scope for this PR; flagged for a follow-up.
+
+## [1.16.0.0] - 2026-04-28
+
+## **Paired-agent tunnel allowlist now matches what the docs already promised. Catch-22 resolved, gate is unit-testable.**
+
+The visible bug: a paired remote agent over the ngrok tunnel hit 403s on `newtab`, `tabs`, `goto-on-existing-tab`, and a chain of other commands the operator docs claimed worked. The hidden bug: the v1.6.0.0 `TUNNEL_COMMANDS` allowlist was set at 17 entries while `docs/REMOTE_BROWSER_ACCESS.md`, `browse/src/cli.ts:546-586`, and the operator-facing instruction blocks all documented 26. The shipped allowlist drifted from the design intent silently for releases. This release closes the gap: 9 commands added (`newtab`, `tabs`, `back`, `forward`, `reload`, `snapshot`, `fill`, `url`, `closetab`), each bounded by the existing per-tab ownership check at `server.ts:613-624`. Scoped tokens default to `tabPolicy: 'own-only'`, so a paired agent still can't navigate, fill, or close on tabs it doesn't own — same isolation as before, just covering more verbs.
+
+### The numbers that matter
+
+Branch totals come from `git diff --shortstat origin/main..HEAD`. Test counts come from `bun test browse/test/dual-listener.test.ts browse/test/tunnel-gate-unit.test.ts browse/test/pair-agent-tunnel-eval.test.ts browse/test/pair-agent-e2e.test.ts` against the merged tree.
+
+| Metric | Δ |
+|---|---|
+| Tunnel allowlist size | **17 → 26 commands** (+53%) |
+| Catch-22 resolution | `newtab` → `goto` → `back` chain works for the first time |
+| Gate testability | inline regex check → **pure exported `canDispatchOverTunnel()`** function |
+| New unit-test coverage | **53 expects** in `tunnel-gate-unit.test.ts` (allowed, blocked, null/undefined/non-string, alias canonicalization) |
+| New behavioral coverage | **4 tests** in `pair-agent-tunnel-eval.test.ts` running BOTH listeners locally (no ngrok) |
+| Source-level guard | exact-set equality against the 26-command literal + ownership-exemption regex |
+| All free tests | **69 pass / 0 fail** on the four touched test files |
+| Codex review passes | **2 outside-voice rounds** during plan mode, 6 of 7 findings incorporated |
+
+### What this means for users running paired agents
+
+Three things change immediately. **First**, paired agents can actually open and drive their own tab without hitting the catch-22 the prior allowlist created. `newtab` succeeds (the ownership-exemption at `server.ts:613` was always there, but the allowlist gated the entry); `goto`, `back`, `forward`, `reload`, `fill`, `closetab` all work on the just-created tab; `snapshot`, `url`, `tabs` give the agent the read-side surface needed to be useful. **Second**, the tunnel-surface gate is unit-testable now — `canDispatchOverTunnel(command)` is pure, exported from `browse/src/server.ts`, and covered by 53 expects. A future refactor that decouples the allowlist literal from the gate logic fails a free test in milliseconds. **Third**, `pair-agent-tunnel-eval.test.ts` exercises the gate end-to-end with BOTH the local and tunnel listeners bound on 127.0.0.1 (no ngrok required) so the routing decision — "this request hit the tunnel listener, run the gate; this one hit the local listener, skip the gate" — is asserted on every PR. The new `BROWSE_TUNNEL_LOCAL_ONLY=1` env var binds the second listener locally without invoking ngrok, gated to no-op outside test mode. Production tunnel still requires `BROWSE_TUNNEL=1` + a valid `NGROK_AUTHTOKEN`.
+
+### Itemized changes
+
+#### Added
+
+- 9 new commands in `browse/src/server.ts:111-120` `TUNNEL_COMMANDS` set: `newtab`, `tabs`, `back`, `forward`, `reload`, `snapshot`, `fill`, `url`, `closetab`. The set is now exported so tests can reference the literal directly.
+- `canDispatchOverTunnel(command: string | undefined | null): boolean` in `browse/src/server.ts` — pure exported function. Handles non-string input, runs `canonicalizeCommand` for alias resolution, returns `TUNNEL_COMMANDS.has(canonical)`.
+- `BROWSE_TUNNEL_LOCAL_ONLY=1` env var in `browse/src/server.ts:2080-2104`. Test-only sibling branch to `BROWSE_TUNNEL=1` that binds the second `Bun.serve` listener via `makeFetchHandler('tunnel')` without invoking ngrok. Persists `tunnelLocalPort` to the state file for the eval to read.
+- `browse/test/tunnel-gate-unit.test.ts`: 53 expects covering all 26 allowed commands, 20 blocked commands (pair, unpair, cookies, setup, launch, restart, stop, tunnel-start, token-mint, etc.), null/undefined/empty/non-string defensive handling, and alias canonicalization (e.g. `set-content` resolves to `load-html` and is correctly rejected since `load-html` isn't tunnel-allowed).
+- `browse/test/pair-agent-tunnel-eval.test.ts`: 4 behavioral tests that spawn the daemon under `BROWSE_HEADLESS_SKIP=1 BROWSE_TUNNEL_LOCAL_ONLY=1`, bind both listeners on 127.0.0.1, mint a scoped token via the existing `/pair` → `/connect` ceremony, and assert: (1) `newtab` over the tunnel passes the gate; (2) `pair` over the tunnel 403s with `disallowed_command:pair` AND writes a fresh denial-log entry to `~/.gstack/security/attempts.jsonl`; (3) `pair` over the local listener does NOT trigger the tunnel gate; (4) regression test for the catch-22 — `newtab` followed by `goto` on the resulting tab does not 403 with `Tab not owned by your agent`.
+
+#### Changed
+
+- `browse/test/dual-listener.test.ts`: must-include + must-exclude assertions replaced with one exact-set-equality test against the 26-command literal. The intersection-only style of the prior tests let new commands sneak into the source without a corresponding test update — the bidirectional check catches it both ways. Added a regex assertion that the `command !== 'newtab'` ownership-exemption clause at `server.ts:613` still exists (catches refactors that re-introduce the catch-22 from the other side).
+- `browse/test/dual-listener.test.ts`: `/command` handler test updated to assert the inline `TUNNEL_COMMANDS.has(cmd)` check is now `canDispatchOverTunnel(body?.command)` — proves the gate is delegated to the pure function and not duplicated.
+- `docs/REMOTE_BROWSER_ACCESS.md:35,168`: bumped "17-command allowlist" to "26-command allowlist". Corrected the denied-commands list (removed `eval`, which IS in the allowlist; the prior doc was wrong).
+- `CLAUDE.md`: bumped the transport-layer security section's "17-command browser-driving allowlist" reference to "26-command".
+
+#### For contributors
+
+- The plan was reviewed under `/plan-eng-review` plus 2 sequential codex outside-voice passes during plan mode. Round-1 codex caught a doc-target mistake (we were going to update `SIDEBAR_MESSAGE_FLOW.md` instead of `REMOTE_BROWSER_ACCESS.md`) and a wrong-layer test design. Round-2 codex caught that the round-1 correction was still wrong (the chosen test harness only binds the local listener) AND that the docs promised 6 more commands than the allowlist had. All 6 of 7 substantive findings landed in the implementation; the 7th (a pre-existing `/pair-agent` `/health` probe mismatch at `cli.ts:656-668`) is logged as out of scope.
+- One known accepted risk: `tabs` over the tunnel returns metadata for ALL tabs in the browser, not just tabs the agent owns. The user authored the trust relationship when they paired the agent, the agent already can't read CONTENT of unowned tabs (write commands blocked, the active tab can't be switched without a `tab <id>` command that's NOT in the allowlist), and tab IDs already leak via the 403 `hint` field on disallowed `goto`. Codex noted that tightening this requires touching the ownership gate itself (the gate falls back to `getActiveTabId()` BEFORE dispatch in `server.ts:603-614`), which is materially out of scope for a catch-22 fix. Logged in the plan failure-mode table as accepted.
+
+## [1.15.0.0] - 2026-04-26
+
+## **Real-PTY test harness ships. 11 plan-mode E2E tests, 23 unit tests, and 50K fewer tokens per invocation.**
+
+Two big pieces of engineering in one release. The headline is a real-PTY test harness — 654 lines of TypeScript on top of `Bun.spawn({terminal:})` — that drives the actual `claude` binary and parses rendered terminal frames. Six new E2E tests on the harness cover behaviors that were structurally unreachable before: format compliance for every gstack `AskUserQuestion`, plan-design UI-scope detection (positive coverage), tool-budget regression vs prior runs, `/ship` end-to-end idempotency against a real git fixture, `/plan-ceo` answer-routing, and `/autoplan` phase sequencing. The branch nets ~11.6K lines smaller against `main` while adding ~1,450 lines of new TypeScript test code — preamble resolvers were rewritten to keep every semantic rule in less prose, and the test surface that catches AskUserQuestion drift expanded from zero to gate-tier on every PR.
+
+### The numbers that matter
+
+Branch totals come from `git diff --shortstat origin/main..HEAD`. Token-level reduction comes from regenerating every `SKILL.md` against the rewritten resolvers (`bun run gen:skill-docs --host all`). E2E numbers come from `EVALS=1 EVALS_TIER=gate bun test test/skill-e2e-*.test.ts` on a clean working tree.
+
+| Metric | Δ |
+|---|---|
+| Net branch size vs `main` | **−11,609 lines** (89 files, +7,240 / −18,849) |
+| New test files added | **8 files** (1 harness unit-test + 7 E2E tests) |
+| New test code shipped | **~1,453 lines** of TypeScript |
+| Real-PTY harness module | **654 lines** in `test/helpers/claude-pty-runner.ts` |
+| Per-invocation token savings | **−196K tokens (−25%)** on cold reads |
+| `plan-ceo-review` preamble | **−43%** (54 KB → 31 KB) |
+| Plan-mode E2E test count | **5 → 11** |
+| New gate-tier paid E2E tests | **+3** (format compliance, design-with-UI, budget regression) |
+| New periodic-tier paid E2E tests | **+3** (mode-routing, ship-idempotency, autoplan-chain) |
+| Helper unit test coverage | **+23 tests** for parser + budget primitives |
+| All free tests | **49 pass, 0 fail** |
+
+| Skill class | Per-invocation surface | Δ |
+|---|---|---|
+| Tier-≥3 plan reviews (full preamble) | ~50 KB → ~30 KB | −40% |
+| Tier-1 quick skills | ~12 KB → ~9 KB | −25% |
+
+Every gstack invocation now sends ~50K fewer tokens to the model on cold reads — that's roughly a quarter of a typical 200K context window freed up for actual work. Tier-≥3 plan reviews keep their full functional surface (Brain Sync, Context Recovery, Routing Injection) and still lose almost half the bytes.
+
+### What this means for builders
+
+Three new classes of regression that were previously impossible to catch now block every PR. **Format drift**: a missing `Recommendation:` line or absent Pros/Cons bullet on an `AskUserQuestion` is caught against the real rendered terminal — not the model's claim about what it would have shown. **Conditional skill paths**: `/plan-design-review` had to early-exit when there's no UI scope, but until this release nothing tested the *positive* path; a regression that flipped the detector to "early-exit always" could have shipped silently. **Tool-budget regressions**: a preamble change that makes any skill burn 2× its prior tool calls fails a free, branch-scoped assertion that runs on every `bun test`.
+
+The harness itself is a reusable primitive. `runPlanSkillObservation()` watches plan-mode terminal output and classifies outcomes as `asked` / `plan_ready` / `silent_write` / `exited` / `timeout`. Three periodic-tier tests built on top of it cover the heavier cases — multi-phase chain ordering, ship idempotency state-machine end-to-end, and answer routing through 8-12 sequential prompts — that don't fit a per-PR budget but run weekly. Pull, run `bun run gen:skill-docs --host all`, and every skill invocation is meaningfully smaller and meaningfully better-tested than the prior release.
+
+### Itemized changes
+
+#### Added
+
+- `test/helpers/claude-pty-runner.ts`: real-PTY test harness using `Bun.spawn({terminal:})` (Bun 1.3.10+ has built-in PTY — no `node-pty`, no native modules). Exposes `launchClaudePty()` for raw session control and `runPlanSkillObservation()` as the high-level contract for plan-mode skill tests.
+- `parseNumberedOptions(visible)` and `isPermissionDialogVisible(visible)` helpers in `claude-pty-runner.ts`. Tests can now look up an option index by its label without hard-coding positions, and auto-grant Claude Code's file-edit / workspace-trust / bash-permission dialogs that fire during preamble side-effects.
+- `findBudgetRegressions()` and `assertNoBudgetRegression()` in `test/helpers/eval-store.ts`. Pure functions returning tests that grew >2× in tools or turns vs the prior eval run, with floors at 5 prior tools / 3 prior turns to avoid noise. Env override `GSTACK_BUDGET_RATIO`.
+- 6 new real-PTY E2E tests on the harness:
+    - `skill-e2e-ask-user-question-format-compliance.test.ts` (gate, ~$0.50/run): asserts every gstack `AskUserQuestion` rendering contains the 7 mandated format elements (ELI10, Recommendation, Pros/Cons with ✅/❌, Net, `(recommended)` label).
+    - `skill-e2e-plan-design-with-ui.test.ts` (gate, ~$0.80/run): positive coverage for `/plan-design-review` UI-scope detection. Counterpart to the existing no-UI early-exit test — without it, a regression that flips the detector to "early-exit always" would ship undetected.
+    - `skill-budget-regression.test.ts` (gate, free): branch-scoped library-only assertion that no skill burns >2× tools or turns vs its prior recorded run.
+    - `skill-e2e-plan-ceo-mode-routing.test.ts` (periodic, ~$3/run): verifies AskUserQuestion answer routing — HOLD SCOPE picks routes to rigor language, SCOPE EXPANSION picks route to expansion language.
+    - `skill-e2e-ship-idempotency.test.ts` (periodic, ~$3/run): runs `/ship` end-to-end against a real git fixture with `STATE: ALREADY_BUMPED` baked in; asserts no double-bump, no double-commit, no fixture mutation.
+    - `skill-e2e-autoplan-chain.test.ts` (periodic, ~$8/run): asserts `/autoplan` phase ordering by tee'ing timestamps as each `**Phase N complete.**` marker appears.
+- `test/helpers-unit.test.ts`: 23 unit tests covering `parseNumberedOptions` edge cases (empty, partial paint, >9 options, stale-vs-fresh anchoring) and `findBudgetRegressions` (noise floor, env override, missing tool data).
+- `test/fixtures/plans/ui-heavy-feature.md`: planted plan with explicit UI scope keywords for the new design-with-UI test.
+- Auto-handling of the workspace-trust dialog so tests run in temp directories without manual intervention.
+- Outcome contract: `asked` | `plan_ready` | `silent_write` | `exited` | `timeout`. Tests pass on `asked` or `plan_ready`, fail on the rest.
+
+#### Changed
+
+- 18 preamble resolvers compressed: `generate-ask-user-format.ts`, `generate-brain-sync-block.ts`, `generate-completeness-section.ts`, `generate-completion-status.ts`, `generate-confusion-protocol.ts`, `generate-context-health.ts`, `generate-context-recovery.ts`, `generate-continuous-checkpoint.ts`, `generate-lake-intro.ts`, `generate-preamble-bash.ts`, `generate-proactive-prompt.ts`, `generate-routing-injection.ts`, `generate-telemetry-prompt.ts`, `generate-upgrade-check.ts`, `generate-vendoring-deprecation.ts`, `generate-voice-directive.ts`, `generate-writing-style-migration.ts`, `generate-writing-style.ts`.
+- All 47 generated `SKILL.md` files regenerated; 3 ship golden fixtures regenerated.
+- Plan-* skills retain full preamble surface (Brain Sync, Context Recovery, Routing Injection) — the early slim attempt that cut these was reverted after diagnosing them as load-bearing.
+- 5 existing plan-mode tests (`plan-ceo`, `plan-eng`, `plan-design`, `plan-devex`, `plan-mode-no-op`) rewritten onto the new harness with a 300s observation budget. All 5 verify-pass under `EVALS=1 EVALS_TIER=gate` against the real `claude` binary in 790s sequential.
+- `isNumberedOptionListVisible` regex tolerates whitespace collapse from TTY cursor-positioning escapes (`\x1b[40C`) which `stripAnsi` removes — `\b2\.` was failing on word-to-word transitions where stripped output read `text2.`.
+
+#### Fixed
+
+- `scripts/skill-check.ts`: new `isRepoRootSymlink()` helper so dev installs that mount the repo root at `host/skills/gstack` (e.g., codex's `.agents/skills/gstack`) get skipped instead of double-counted.
+- `test/skill-validation.test.ts`: known-large-fixture exemption keeps `browse/test/fixtures/security-bench-haiku-responses.json` (27 MB BrowseSafe-Bench replay fixture, intentional) out of the size warning.
+
+#### Removed
+
+- `test/helpers/plan-mode-helpers.ts`: superseded by `claude-pty-runner.ts`. Zero callers remained after the rewrite.
+
+#### For contributors
+
+- `test/helpers/touchfiles.ts`: 5 plan-mode test selections + e2e-harness-audit selection now point at `claude-pty-runner.ts` instead of the deleted helper. 6 new entries (`ask-user-question-format-pty`, `plan-ceo-mode-routing`, `plan-design-with-ui-scope`, `budget-regression-pty`, `ship-idempotency-pty`, `autoplan-chain-pty`) with tier classifications: 3 gate, 3 periodic.
+- `test/e2e-harness-audit.test.ts`: recognizes `runPlanSkillObservation` as a valid coverage path alongside the legacy `canUseTool` / `runPlanModeSkillTest` patterns.
+- New unit test: `test/gen-skill-docs.test.ts` asserts plan-review preambles stay under 33 KB and the slim Voice section preserves its load-bearing semantic contract (lead-with-the-point, name-the-file, user-outcome framing, no-corporate, no-AI-vocab, user-sovereignty).
+- `test/touchfiles.test.ts`: skill-specific change selection count updated 15 → 18 to match the 6 new touchfile entries that depend on `plan-ceo-review/**`.
+
+## [1.14.0.0] - 2026-04-25
+
+## **The gstack browser sidebar is now an interactive Claude Code REPL with live tab awareness.**
+
+Open the side panel and Claude Code is right there in a real terminal. Type, watch the agent work, switch browser tabs and Claude sees the change. The old one-shot chat queue is gone. Two-way conversation, slash commands, `/resume`, ANSI colors, all of it. Plus a `$B tab-each` command that fans out a single browse command across every open tab and returns per-tab JSON results.
+
+### The numbers that matter
+
+| Metric | Before | After | Δ |
+|---|---|---|---|
+| Sidebar surfaces | Chat (one-shot `claude -p`) + 3 debug | Terminal (live PTY) + 3 debug | -1 surface, +interactive |
+| Subprocesses spawned per session | Many (one per chat message) | One (PTY claude, lazy-spawned) | -N |
+| Lines in `extension/sidepanel.js` | 1969 | 1042 | -47% |
+| Total diff | — | 27 files, +2875 / -3885 | -1010 net |
+| New unit + integration + regression tests | 0 | 56+ | +56 |
+| Live `tabs.json` push latency | n/a (no live state) | <50ms after `chrome.tabs` event | new capability |
+
+### What this means for builders
+
+Open the sidebar, type. Real PTY means slash commands, `/resume`, real ANSI rendering, real claude process lifecycle. Switch browser tabs while Claude is running and `<stateDir>/tabs.json` + `active-tab.json` update in place — Claude reads them, no need to ask `$B tabs`. Need to do the same thing on every tab? `$B tab-each <command>` returns a JSON array, original active tab restored when done, no OS focus stealing.
+
+The old chat queue is gone. `sidebar-agent.ts`, `/sidebar-command`, `/sidebar-chat`, `/sidebar-agent/event` all deleted. The Cleanup / Screenshot / Cookies toolbar buttons survive in the Terminal pane — Cleanup pipes its prompt straight into the live PTY via `window.gstackInjectToTerminal()` instead of spawning yet another `claude -p`.
+
+### Itemized changes
+
+#### Added
+
+- **Interactive Terminal sidebar tab.** xterm.js + a non-compiled `terminal-agent.ts` Bun process that spawns claude with `Bun.spawn({terminal: {rows, cols, data}})`. Auto-connects when the side panel opens, no keypress needed.
+- **`$B tab-each <command>`** — fan-out helper for multi-tab work. Returns `{command, args, total, results: [{tabId, url, title, status, output}]}`. Skips chrome:// pages, scope-checks the inner command before iterating, restores the original active tab in a `finally` block, never pulls focus away from the user's foreground app.
+- **Live tab state files.** `<stateDir>/tabs.json` (full list with id, url, title, active, pinned, audible, windowId) and `<stateDir>/active-tab.json` (current active). Updated atomically on every `chrome.tabs` event (activated, created, removed, URL/title change). Claude reads on demand instead of running `$B tabs`.
+- **Tab-awareness system prompt** injected via `claude --append-system-prompt` at spawn so the model knows about the state files and the `$B tab-each` command without being told.
+- **Always-visible Restart button** in the Terminal toolbar. Force-restart claude any time, not just from the "session ended" state.
+
+#### Changed
+- **Sidebar is Terminal-only.** No more `Terminal | Chat` primary tab nav. Activity / Refs / Inspector still live behind the `debug` toggle in the footer. Quick-actions (🧹 Cleanup / 📸 Screenshot / 🍪 Cookies) moved into the Terminal toolbar.
+- **WebSocket auth uses `Sec-WebSocket-Protocol`** instead of cookies. Browsers can't set `Authorization` on WS upgrades, and `SameSite=Strict` cookies don't survive the cross-port jump from server.ts:34567 to the agent's random port from a chrome-extension origin. The token rides on `new WebSocket(url, [`gstack-pty.<token>`])` and the agent echoes the protocol back (Chromium closes connections that don't pick a protocol).
+- **Cleanup button now drives the live PTY.** Clicking "🧹 Cleanup" injects the cleanup prompt straight into claude via `window.gstackInjectToTerminal()`. The Inspector "Send to Code" action uses the same path. No more `/sidebar-command` POSTs.
+- **Repaint after debug-tab close.** xterm.js doesn't auto-redraw when its container flips from `display: none` back to `display: flex`. A MutationObserver on `#tab-terminal`'s class attribute now forces a `fitAddon.fit() + term.refresh() + resize` push when the pane becomes visible.
+
+#### Removed
+- **`browse/src/sidebar-agent.ts`** — the one-shot `claude -p` queue worker. ~900 lines.
+- **Server endpoints**: `/sidebar-command`, `/sidebar-chat[/clear]`, `/sidebar-agent/{event,kill,stop}`, `/sidebar-tabs[/switch]`, `/sidebar-session{,/new,/list}`, `/sidebar-queue/dismiss`. ~600 lines.
+- **Chat-related state** in server.ts: `ChatEntry`, `SidebarSession`, `TabAgentState`, `pickSidebarModel`, `addChatEntry`, `processAgentEvent`, `killAgent`, the agent-health watchdog, `chatBuffer`, the per-tab agent map.
+- **Chat UI in sidepanel.html**: primary-tab nav, `<main id="tab-chat">`, the chat input bar, the experimental "Browser co-pilot" banner, the security event banner, the `clear-chat` footer button.
+- **Five obsolete test files**: `sidebar-agent.test.ts`, `sidebar-agent-roundtrip.test.ts`, `security-e2e-fullstack.test.ts`, `security-review-fullstack.test.ts`, `security-review-sidepanel-e2e.test.ts`. Plus 5 chat-only describe blocks inside surviving security tests (loadSession session-ID validation, switchChatTab DocumentFragment, pollChat reentrancy, sidebar-tabs URL sanitization, agent queue security).
+
+#### For contributors
+- **`browse/src/pty-session-cookie.ts`** mirrors `sse-session-cookie.ts`. Same TTL, same opportunistic pruning, separate registry (PTY tokens must never be valid as SSE tokens or vice versa).
+- **`docs/designs/SIDEBAR_MESSAGE_FLOW.md`** rewritten around the Terminal flow: WebSocket upgrade, dual-token model (`AUTH_TOKEN` for `/pty-session`, `gstack-pty.<token>` for `/ws`, `INTERNAL_TOKEN` for server↔agent loopback), threat-model boundary (Terminal tab bypasses the prompt-injection stack on purpose; user keystrokes are the trust source).
+- **`browse/test/terminal-agent.test.ts`** (16 tests) + `terminal-agent-integration.test.ts` (real `/bin/bash` PTY round-trip, raw `Sec-WebSocket-Protocol` upgrade verification) + `tab-each.test.ts` (10 tests with mock `BrowserManager`) + `sidebar-tabs.test.ts` (27 structural assertions locking the chat-rip invariants).
+- **CLAUDE.md** updated with the dual-token model, the cookie-vs-protocol rationale, and the cross-pane injection pattern.
+- **`vendor:xterm`** build step copies `xterm@5.x` and `xterm-addon-fit` from `node_modules/` into `extension/lib/` at build time. xterm files are gitignored.
+- **TODOS.md** carries three v1.1+ follow-ups: PTY session survival across sidebar reload (Issue 1C deferred), `/health` `AUTH_TOKEN` distribution audit (codex finding, pre-existing soft leak), and dropping the now-dead `security-classifier.ts` ML pipeline.
+
 ## [1.13.0.0] - 2026-04-25
 
 ## **`/gstack-claude` gives non-Claude hosts a read-only outside voice.**
