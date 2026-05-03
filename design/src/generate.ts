@@ -1,10 +1,10 @@
 /**
- * Generate UI mockups via OpenAI Responses API with image_generation tool.
+ * Generate UI mockups via the configured provider (default: Qwen DashScope).
  */
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey, openaiBase } from "./auth";
+import { getImageGenConfig, callImageGenApi } from "./design-config";
 import { parseBrief } from "./brief";
 import { createSession, sessionPath } from "./session";
 import { checkMockup } from "./check";
@@ -15,7 +15,9 @@ export interface GenerateOptions {
   output: string;
   check?: boolean;
   retry?: number;
+  /** Image size override, e.g. "2048*2048". Falls back to config/default when omitted. */
   size?: string;
+  /** Ignored for Qwen — kept for CLI compat. */
   quality?: string;
 }
 
@@ -27,83 +29,16 @@ export interface GenerateResult {
 }
 
 /**
- * Call OpenAI Responses API with image_generation tool.
- * Returns the response ID and base64 image data.
- */
-async function callImageGeneration(
-  apiKey: string,
-  prompt: string,
-  size: string,
-  quality: string,
-): Promise<{ responseId: string; imageData: string }> {
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
-
-  try {
-    const response = await fetch(`${openaiBase()}/v1/responses`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        input: prompt,
-        tools: [{
-          type: "image_generation",
-          size,
-          quality,
-        }],
-      }),
-      signal: controller.signal,
-    });
-
-    if (!response.ok) {
-      const error = await response.text();
-      if (response.status === 403 && error.includes("organization must be verified")) {
-        throw new Error(
-          "OpenAI organization verification required.\n"
-          + "Go to https://platform.openai.com/settings/organization to verify.\n"
-          + "After verification, wait up to 15 minutes for access to propagate.",
-        );
-      }
-      throw new Error(`API error (${response.status}): ${error.slice(0, 200)}`);
-    }
-
-    const data = await response.json() as any;
-
-    const imageItem = data.output?.find((item: any) =>
-      item.type === "image_generation_call"
-    );
-
-    if (!imageItem?.result) {
-      throw new Error(
-        `No image data in response. Output types: ${data.output?.map((o: any) => o.type).join(", ") || "none"}`
-      );
-    }
-
-    return {
-      responseId: data.id,
-      imageData: imageItem.result,
-    };
-  } finally {
-    clearTimeout(timeout);
-  }
-}
-
-/**
  * Generate a single mockup from a brief.
  */
 export async function generate(options: GenerateOptions): Promise<GenerateResult> {
-  const apiKey = requireApiKey();
+  const config = getImageGenConfig();
 
   // Parse the brief
   const prompt = options.briefFile
     ? parseBrief(options.briefFile, true)
     : parseBrief(options.brief!, false);
 
-  const size = options.size || "1536x1024";
-  const quality = options.quality || "high";
   const maxRetries = options.retry ?? 0;
 
   let lastResult: GenerateResult | null = null;
@@ -115,7 +50,21 @@ export async function generate(options: GenerateOptions): Promise<GenerateResult
 
     // Generate the image
     const startTime = Date.now();
-    const { responseId, imageData } = await callImageGeneration(apiKey, prompt, size, quality);
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 120_000);
+    let responseId: string;
+    let imageData: string;
+    try {
+      const result = await callImageGenApi(config, prompt, {
+        size: options.size,
+        quality: options.quality,
+        signal: controller.signal,
+      });
+      responseId = result.responseId;
+      imageData = result.imageData;
+    } finally {
+      clearTimeout(timeout);
+    }
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
 
     // Write to disk

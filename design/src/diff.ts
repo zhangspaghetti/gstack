@@ -5,7 +5,7 @@
  */
 
 import fs from "fs";
-import { requireApiKey, openaiBase } from "./auth";
+import { getVisionConfig, callVisionApi, getImageMimeType } from "./design-config";
 
 export interface DiffResult {
   differences: { area: string; description: string; severity: string }[];
@@ -20,7 +20,7 @@ export async function diffMockups(
   beforePath: string,
   afterPath: string,
 ): Promise<DiffResult> {
-  const apiKey = requireApiKey();
+  const config = getVisionConfig();
   const beforeData = fs.readFileSync(beforePath).toString("base64");
   const afterData = fs.readFileSync(afterPath).toString("base64");
 
@@ -28,20 +28,12 @@ export async function diffMockups(
   const timeout = setTimeout(() => controller.abort(), 60_000);
 
   try {
-    const response = await fetch(`${openaiBase()}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: `Compare these two UI images. The first is the BEFORE (or design intent), the second is the AFTER (or actual implementation). Return valid JSON only:
+    const content = await callVisionApi(config, [{
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: `Compare these two UI images. The first is the BEFORE (or design intent), the second is the AFTER (or actual implementation). Return valid JSON only:
 
 {
   "differences": [
@@ -55,32 +47,25 @@ export async function diffMockups(
 severity: "high" = noticeable to any user, "medium" = visible on close inspection, "low" = minor/pixel-level.
 matchScore: 100 = identical, 0 = completely different.
 Focus on layout, typography, colors, spacing, and element presence/absence. Ignore rendering differences (anti-aliasing, sub-pixel).`,
-            },
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${beforeData}` },
-            },
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${afterData}` },
-            },
-          ],
-        }],
-        max_tokens: 600,
-        response_format: { type: "json_object" },
-      }),
+        },
+        {
+          type: "image_url",
+          image_url: { url: `data:${getImageMimeType(beforePath)};base64,${beforeData}` },
+        },
+        {
+          type: "image_url",
+          image_url: { url: `data:${getImageMimeType(afterPath)};base64,${afterData}` },
+        },
+      ],
+    }], {
       signal: controller.signal,
+      maxTokensOverride: config.maxTokens > 200 ? config.maxTokens : 600,
+      responseFormat: { type: "json_object" },
     });
-
-    if (!response.ok) {
-      const error = await response.text();
-      console.error(`Diff API error (${response.status}): ${error.slice(0, 200)}`);
-      return { differences: [], summary: "Diff unavailable", matchScore: -1 };
-    }
-
-    const data = await response.json() as any;
-    const content = data.choices?.[0]?.message?.content?.trim() || "";
     return JSON.parse(content) as DiffResult;
+  } catch (err: any) {
+    console.error(`Diff API error: ${err.message}`);
+    return { differences: [], summary: "Diff unavailable", matchScore: -1 };
   } finally {
     clearTimeout(timeout);
   }

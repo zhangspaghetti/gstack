@@ -1,21 +1,20 @@
 /**
- * Commit 0: Prototype validation
- * Sends 3 design briefs to GPT Image API via Responses API.
+ * Prototype validation script.
+ * Sends 3 design briefs to the configured image generation provider
+ * (default: DashScope Qwen, controlled by DESIGN_IMAGE_PROVIDER env var).
  * Validates: text rendering quality, layout accuracy, visual coherence.
  *
- * Run: GSTACK_OPENAI_API_KEY=$(cat ~/.gstack/openai.json | python3 -c "import sys,json;print(json.load(sys.stdin)['api_key'])") bun run design/prototype.ts
+ * Run:
+ *   DASHSCOPE_API_KEY=sk-... bun run design/prototype.ts
+ * Or with OpenAI:
+ *   DESIGN_IMAGE_PROVIDER=openai GSTACK_OPENAI_API_KEY=sk-... bun run design/prototype.ts
  */
 
 import fs from "fs";
 import path from "path";
+import { getImageGenConfig, callImageGenApi } from "./src/design-config";
 
-const API_KEY = process.env.GSTACK_OPENAI_API_KEY
-  || JSON.parse(fs.readFileSync(path.join(process.env.HOME!, ".gstack/openai.json"), "utf-8")).api_key;
-
-if (!API_KEY) {
-  console.error("No API key found. Set GSTACK_OPENAI_API_KEY or save to ~/.gstack/openai.json");
-  process.exit(1);
-}
+const imageConfig = getImageGenConfig();
 
 const OUTPUT_DIR = "/tmp/gstack-prototype-" + Date.now();
 fs.mkdirSync(OUTPUT_DIR, { recursive: true });
@@ -38,6 +37,7 @@ const briefs = [
 async function generateMockup(brief: { name: string; prompt: string }) {
   console.log(`\n${"=".repeat(60)}`);
   console.log(`Generating: ${brief.name}`);
+  console.log(`Provider:   ${imageConfig.provider} / ${imageConfig.model}`);
   console.log(`${"=".repeat(60)}`);
 
   const startTime = Date.now();
@@ -45,55 +45,25 @@ async function generateMockup(brief: { name: string; prompt: string }) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 120_000); // 2 min timeout
 
-  const response = await fetch(`${process.env.GSTACK_OPENAI_HOST ?? "https://api.openai.com"}/v1/responses`, {
-    method: "POST",
-    headers: {
-      "Authorization": `Bearer ${API_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      model: "gpt-4o",
-      input: brief.prompt,
-      tools: [{
-        type: "image_generation",
-        size: "1536x1024",
-        quality: "high"
-      }],
-    }),
-    signal: controller.signal,
-  });
-  clearTimeout(timeout);
+  try {
+    const { imageData } = await callImageGenApi(imageConfig, brief.prompt, {
+      signal: controller.signal,
+    });
+    clearTimeout(timeout);
 
-  if (!response.ok) {
-    const error = await response.text();
-    console.error(`FAILED (${response.status}): ${error}`);
+    const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+    const outputPath = path.join(OUTPUT_DIR, `${brief.name}.png`);
+    const imageBuffer = Buffer.from(imageData, "base64");
+    fs.writeFileSync(outputPath, imageBuffer);
+
+    console.log(`OK (${elapsed}s) → ${outputPath}`);
+    console.log(`   Size: ${(imageBuffer.length / 1024).toFixed(0)} KB`);
+    return outputPath;
+  } catch (err: any) {
+    clearTimeout(timeout);
+    console.error(`FAILED: ${err.message}`);
     return null;
   }
-
-  const data = await response.json() as any;
-  const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-
-  // Find the image generation result in output
-  const imageItem = data.output?.find((item: any) =>
-    item.type === "image_generation_call"
-  );
-
-  if (!imageItem?.result) {
-    console.error("No image data in response. Output types:",
-      data.output?.map((o: any) => o.type));
-    console.error("Full response:", JSON.stringify(data, null, 2).slice(0, 500));
-    return null;
-  }
-
-  const outputPath = path.join(OUTPUT_DIR, `${brief.name}.png`);
-  const imageBuffer = Buffer.from(imageItem.result, "base64");
-  fs.writeFileSync(outputPath, imageBuffer);
-
-  console.log(`OK (${elapsed}s) → ${outputPath}`);
-  console.log(`   Size: ${(imageBuffer.length / 1024).toFixed(0)} KB`);
-  console.log(`   Usage: ${JSON.stringify(data.usage || {})}`);
-
-  return outputPath;
 }
 
 async function main() {

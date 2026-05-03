@@ -60,33 +60,42 @@ function printUsage(): void {
     console.log(`  ${name.padEnd(12)} ${info.description}`);
     console.log(`  ${"".padEnd(12)} ${info.usage}`);
   }
-  console.log("\nAuth: ~/.gstack/openai.json or GSTACK_OPENAI_API_KEY env var");
+  console.log("\nAuth (DashScope/Qwen, default):");
+  console.log("  export DASHSCOPE_API_KEY=sk-...");
+  console.log("Auth (OpenAI):");
+  console.log("  export DESIGN_IMAGE_PROVIDER=openai GSTACK_OPENAI_API_KEY=sk-...");
+  console.log("Auth (MiMo vision):");
+  console.log("  export DESIGN_VISION_PROVIDER=mimo DESIGN_VISION_API_KEY=...");
   console.log("Setup: $D setup");
 }
 
 async function runSetup(): Promise<void> {
   const existing = resolveApiKey();
   if (existing) {
-    console.log("Existing API key found. Running smoke test...");
+    console.log("Existing API key found (legacy ~/.gstack/openai.json). Running smoke test...");
   } else {
-    console.log("No API key found. Please enter your OpenAI API key.");
-    console.log("Get one at: https://platform.openai.com/api-keys");
-    console.log("(Needs image generation permissions)\n");
+    console.log("Tip: For DashScope/Qwen (default provider), set:");
+    console.log("  export DASHSCOPE_API_KEY=sk-...");
+    console.log("\nFor OpenAI:");
+    console.log("  export DESIGN_IMAGE_PROVIDER=openai");
+    console.log("  export GSTACK_OPENAI_API_KEY=sk-...");
+    console.log("\nOr enter an API key to save to ~/.gstack/openai.json (OpenAI only):");
 
     // Read from stdin
-    process.stdout.write("API key: ");
+    process.stdout.write("API key (enter to skip): ");
     const reader = Bun.stdin.stream().getReader();
     const { value } = await reader.read();
     reader.releaseLock();
     const key = new TextDecoder().decode(value).trim();
 
-    if (!key || !key.startsWith("sk-")) {
-      console.error("Invalid key. Must start with 'sk-'.");
-      process.exit(1);
+    if (key) {
+      if (!key.startsWith("sk-")) {
+        console.error("Invalid key. Must start with 'sk-'.");
+        process.exit(1);
+      }
+      saveApiKey(key);
+      console.log("Key saved to ~/.gstack/openai.json (0600 permissions).");
     }
-
-    saveApiKey(key);
-    console.log("Key saved to ~/.gstack/openai.json (0600 permissions).");
   }
 
   // Smoke test

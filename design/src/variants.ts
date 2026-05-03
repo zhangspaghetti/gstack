@@ -6,7 +6,7 @@
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey, openaiBase } from "./auth";
+import { getImageGenConfig, callImageGenApi, type ImageGenConfig } from "./design-config";
 import { parseBrief } from "./brief";
 
 export interface VariantsOptions {
@@ -30,21 +30,19 @@ const STYLE_VARIATIONS = [
 ];
 
 /**
- * Generate a single variant with retry on 429.
+ * Generate a single variant with retry on rate-limit (429).
  */
 async function generateVariant(
-  apiKey: string,
+  config: ImageGenConfig,
   prompt: string,
   outputPath: string,
-  size: string,
-  quality: string,
+  sizeOverride?: string,
 ): Promise<{ path: string; success: boolean; error?: string }> {
   const maxRetries = 3;
   let lastError = "";
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
-      // Exponential backoff: 2s, 4s, 8s
       const delay = Math.pow(2, attempt) * 1000;
       console.error(`  Rate limited, retrying in ${delay / 1000}s...`);
       await new Promise(r => setTimeout(r, delay));
@@ -54,50 +52,24 @@ async function generateVariant(
     const timeout = setTimeout(() => controller.abort(), 120_000);
 
     try {
-      const response = await fetch(`${openaiBase()}/v1/responses`, {
-        method: "POST",
-        headers: {
-          "Authorization": `Bearer ${apiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          model: "gpt-4o",
-          input: prompt,
-          tools: [{ type: "image_generation", size, quality }],
-        }),
+      const { imageData } = await callImageGenApi(config, prompt, {
+        size: sizeOverride,
         signal: controller.signal,
       });
-
       clearTimeout(timeout);
-
-      if (response.status === 429) {
-        lastError = "Rate limited (429)";
-        continue;
-      }
-
-      if (!response.ok) {
-        const error = await response.text();
-        if (response.status === 403 && error.includes("organization must be verified")) {
-          return { path: outputPath, success: false, error: "OpenAI organization verification required. Go to https://platform.openai.com/settings/organization to verify." };
-        }
-        return { path: outputPath, success: false, error: `API error (${response.status}): ${error.slice(0, 200)}` };
-      }
-
-      const data = await response.json() as any;
-      const imageItem = data.output?.find((item: any) => item.type === "image_generation_call");
-
-      if (!imageItem?.result) {
-        return { path: outputPath, success: false, error: "No image data in response" };
-      }
-
-      fs.writeFileSync(outputPath, Buffer.from(imageItem.result, "base64"));
+      fs.writeFileSync(outputPath, Buffer.from(imageData, "base64"));
       return { path: outputPath, success: true };
     } catch (err: any) {
       clearTimeout(timeout);
       if (err.name === "AbortError") {
         return { path: outputPath, success: false, error: "Timeout (120s)" };
       }
-      lastError = err.message;
+      // Retry on rate limit
+      if (err.message?.includes("429") || err.message?.toLowerCase().includes("rate")) {
+        lastError = "Rate limited";
+        continue;
+      }
+      return { path: outputPath, success: false, error: err.message };
     }
   }
 
@@ -108,23 +80,21 @@ async function generateVariant(
  * Generate N variants with staggered parallel execution.
  */
 export async function variants(options: VariantsOptions): Promise<void> {
-  const apiKey = requireApiKey();
+  const config = getImageGenConfig();
   const baseBrief = options.briefFile
     ? parseBrief(options.briefFile, true)
     : parseBrief(options.brief!, false);
-
-  const quality = options.quality || "high";
 
   fs.mkdirSync(options.outputDir, { recursive: true });
 
   // If viewports specified, generate responsive variants instead of style variants
   if (options.viewports) {
-    await generateResponsiveVariants(apiKey, baseBrief, options.outputDir, options.viewports, quality);
+    await generateResponsiveVariants(config, baseBrief, options.outputDir, options.viewports);
     return;
   }
 
   const count = Math.min(options.count, 7); // Cap at 7 style variations
-  const size = options.size || "1536x1024";
+  const size = options.size;
 
   console.error(`Generating ${count} variants...`);
   const startTime = Date.now();
@@ -146,7 +116,7 @@ export async function variants(options: VariantsOptions): Promise<void> {
       new Promise(resolve => setTimeout(resolve, delay))
         .then(() => {
           console.error(`  Starting variant ${String.fromCharCode(65 + i)}...`);
-          return generateVariant(apiKey, prompt, outputPath, size, quality);
+          return generateVariant(config, prompt, outputPath, size);
         })
     );
   }
@@ -183,18 +153,18 @@ export async function variants(options: VariantsOptions): Promise<void> {
   }, null, 2));
 }
 
+// Qwen-compatible recommended sizes for common viewport shapes
 const VIEWPORT_CONFIGS: Record<string, { size: string; suffix: string; desc: string }> = {
-  desktop: { size: "1536x1024", suffix: "desktop", desc: "Desktop (1536x1024)" },
-  tablet: { size: "1024x1024", suffix: "tablet", desc: "Tablet (1024x1024)" },
-  mobile: { size: "1024x1536", suffix: "mobile", desc: "Mobile (1024x1536, portrait)" },
+  desktop: { size: "2688*1536", suffix: "desktop", desc: "Desktop (2688*1536, 16:9)" },
+  tablet: { size: "2048*2048", suffix: "tablet", desc: "Tablet (2048*2048, 1:1)" },
+  mobile: { size: "1536*2688", suffix: "mobile", desc: "Mobile (1536*2688, 9:16 portrait)" },
 };
 
 async function generateResponsiveVariants(
-  apiKey: string,
+  config: ImageGenConfig,
   baseBrief: string,
   outputDir: string,
   viewports: string,
-  quality: string,
 ): Promise<void> {
   const viewportList = viewports.split(",").map(v => v.trim().toLowerCase());
   const configs = viewportList.map(v => VIEWPORT_CONFIGS[v]).filter(Boolean);
@@ -207,20 +177,20 @@ async function generateResponsiveVariants(
   console.error(`Generating responsive variants: ${configs.map(c => c.desc).join(", ")}...`);
   const startTime = Date.now();
 
-  const promises = configs.map((config, i) => {
-    const prompt = `${baseBrief}\n\nViewport: ${config.desc}. Adapt the layout for this screen size. ${
-      config.suffix === "mobile" ? "Use a single-column layout, larger touch targets, and mobile navigation patterns." :
-      config.suffix === "tablet" ? "Use a responsive layout that works for medium screens." :
+  const promises = configs.map((vpConfig, i) => {
+    const prompt = `${baseBrief}\n\nViewport: ${vpConfig.desc}. Adapt the layout for this screen size. ${
+      vpConfig.suffix === "mobile" ? "Use a single-column layout, larger touch targets, and mobile navigation patterns." :
+      vpConfig.suffix === "tablet" ? "Use a responsive layout that works for medium screens." :
       ""
     }`;
-    const outputPath = path.join(outputDir, `responsive-${config.suffix}.png`);
+    const outputPath = path.join(outputDir, `responsive-${vpConfig.suffix}.png`);
     const delay = i * 1500;
 
     return new Promise<{ path: string; success: boolean; error?: string }>(resolve =>
       setTimeout(resolve, delay)
     ).then(() => {
-      console.error(`  Starting ${config.desc}...`);
-      return generateVariant(apiKey, prompt, outputPath, config.size, quality);
+      console.error(`  Starting ${vpConfig.desc}...`);
+      return generateVariant(config, prompt, outputPath, vpConfig.size);
     });
   });
 

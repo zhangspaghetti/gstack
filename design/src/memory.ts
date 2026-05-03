@@ -13,7 +13,7 @@
 
 import fs from "fs";
 import path from "path";
-import { requireApiKey, openaiBase } from "./auth";
+import { getVisionConfig, callVisionApi, getImageMimeType } from "./design-config";
 
 export interface ExtractedDesign {
   colors: { name: string; hex: string; usage: string }[];
@@ -27,31 +27,23 @@ export interface ExtractedDesign {
  * Extract visual language from an approved mockup PNG.
  */
 export async function extractDesignLanguage(imagePath: string): Promise<ExtractedDesign> {
-  const apiKey = requireApiKey();
+  const config = getVisionConfig();
   const imageData = fs.readFileSync(imagePath).toString("base64");
 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 60_000);
 
   try {
-    const response = await fetch(`${openaiBase()}/v1/chat/completions`, {
-      method: "POST",
-      headers: {
-        "Authorization": `Bearer ${apiKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        model: "gpt-4o",
-        messages: [{
-          role: "user",
-          content: [
-            {
-              type: "image_url",
-              image_url: { url: `data:image/png;base64,${imageData}` },
-            },
-            {
-              type: "text",
-              text: `Analyze this UI mockup and extract the design language. Return valid JSON only, no markdown:
+    const content = await callVisionApi(config, [{
+      role: "user",
+      content: [
+        {
+          type: "image_url",
+          image_url: { url: `data:${getImageMimeType(imagePath)};base64,${imageData}` },
+        },
+        {
+          type: "text",
+          text: `Analyze this UI mockup and extract the design language. Return valid JSON only, no markdown:
 
 {
   "colors": [{"name": "primary", "hex": "#...", "usage": "buttons, links"}, ...],
@@ -62,22 +54,13 @@ export async function extractDesignLanguage(imagePath: string): Promise<Extracte
 }
 
 Extract real values from what you see. Be specific about hex colors and font sizes.`,
-            },
-          ],
-        }],
-        max_tokens: 800,
-        response_format: { type: "json_object" },
-      }),
+        },
+      ],
+    }], {
       signal: controller.signal,
+      maxTokensOverride: config.maxTokens > 200 ? config.maxTokens : 800,
+      responseFormat: { type: "json_object" },
     });
-
-    if (!response.ok) {
-      console.error(`Vision extraction failed (${response.status})`);
-      return defaultDesign();
-    }
-
-    const data = await response.json() as any;
-    const content = data.choices?.[0]?.message?.content?.trim() || "";
     return JSON.parse(content) as ExtractedDesign;
   } catch (err: any) {
     console.error(`Design extraction error: ${err.message}`);
