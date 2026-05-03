@@ -224,8 +224,8 @@ export function getVisionConfig(): VisionConfig {
   const apiKey =
     process.env.DESIGN_VISION_API_KEY
     ?? process.env.DASHSCOPE_API_KEY
-    ?? process.env.GSTACK_OPENAI_API_KEY
     ?? file.vision?.apiKey
+    ?? (visionProvider === "openai" ? process.env.GSTACK_OPENAI_API_KEY : undefined)
     ?? "";
 
   if (!apiKey) {
