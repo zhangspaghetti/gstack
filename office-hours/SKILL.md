@@ -1287,10 +1287,11 @@ Emit ONE AskUserQuestion that lists every alternative (A/B and optionally C) as 
 
 ```bash
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+_find_bin() { local b="$1"; [ -x "${b}.exe" ] && echo "${b}.exe" && return; [ -x "${b}" ] && echo "${b}"; }
 D=""
-[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/design/dist/design" ] && D="$_ROOT/.claude/skills/gstack/design/dist/design"
-[ -z "$D" ] && D="$HOME/.claude/skills/gstack/design/dist/design"
-[ -x "$D" ] && echo "DESIGN_READY" || echo "DESIGN_NOT_AVAILABLE"
+[ -n "$_ROOT" ] && D="$(_find_bin "$_ROOT/.claude/skills/gstack/design/dist/design")"
+[ -z "$D" ] && D="$(_find_bin "$HOME/.claude/skills/gstack/design/dist/design")"
+[ -n "$D" ] && echo "DESIGN_READY" || echo "DESIGN_NOT_AVAILABLE"
 ```
 
 **If `DESIGN_NOT_AVAILABLE`:** Fall back to the HTML wireframe approach below

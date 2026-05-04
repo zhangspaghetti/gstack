@@ -927,18 +927,20 @@ Report findings before proceeding to Step 0.
 
 ```bash
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+# _find_bin: prefer .exe (Windows), fall back to no extension (macOS/Linux)
+_find_bin() { local b="$1"; [ -x "${b}.exe" ] && echo "${b}.exe" && return; [ -x "${b}" ] && echo "${b}"; }
 D=""
-[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/design/dist/design" ] && D="$_ROOT/.claude/skills/gstack/design/dist/design"
-[ -z "$D" ] && D="$HOME/.claude/skills/gstack/design/dist/design"
-if [ -x "$D" ]; then
+[ -n "$_ROOT" ] && D="$(_find_bin "$_ROOT/.claude/skills/gstack/design/dist/design")"
+[ -z "$D" ] && D="$(_find_bin "$HOME/.claude/skills/gstack/design/dist/design")"
+if [ -n "$D" ]; then
   echo "DESIGN_READY: $D"
 else
   echo "DESIGN_NOT_AVAILABLE"
 fi
 B=""
-[ -n "$_ROOT" ] && [ -x "$_ROOT/.claude/skills/gstack/browse/dist/browse" ] && B="$_ROOT/.claude/skills/gstack/browse/dist/browse"
-[ -z "$B" ] && B="$HOME/.claude/skills/gstack/browse/dist/browse"
-if [ -x "$B" ]; then
+[ -n "$_ROOT" ] && B="$(_find_bin "$_ROOT/.claude/skills/gstack/browse/dist/browse")"
+[ -z "$B" ] && B="$(_find_bin "$HOME/.claude/skills/gstack/browse/dist/browse")"
+if [ -n "$B" ]; then
   echo "BROWSE_READY: $B"
 else
   echo "BROWSE_NOT_AVAILABLE (will use 'open' to view comparison boards)"

@@ -790,18 +790,20 @@ export function generateDesignSetup(ctx: TemplateContext): string {
 
 \`\`\`bash
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+# _find_bin: prefer .exe (Windows), fall back to no extension (macOS/Linux)
+_find_bin() { local b="$1"; [ -x "\${b}.exe" ] && echo "\${b}.exe" && return; [ -x "\${b}" ] && echo "\${b}"; }
 D=""
-[ -n "$_ROOT" ] && [ -x "$_ROOT/${ctx.paths.localSkillRoot}/design/dist/design" ] && D="$_ROOT/${ctx.paths.localSkillRoot}/design/dist/design"
-[ -z "$D" ] && D="$HOME${ctx.paths.designDir.replace(/^~/, '')}/design"
-if [ -x "$D" ]; then
+[ -n "$_ROOT" ] && D="$(_find_bin "$_ROOT/${ctx.paths.localSkillRoot}/design/dist/design")"
+[ -z "$D" ] && D="$(_find_bin "$HOME${ctx.paths.designDir.replace(/^~/, '')}/design")"
+if [ -n "$D" ]; then
   echo "DESIGN_READY: $D"
 else
   echo "DESIGN_NOT_AVAILABLE"
 fi
 B=""
-[ -n "$_ROOT" ] && [ -x "$_ROOT/${ctx.paths.localSkillRoot}/browse/dist/browse" ] && B="$_ROOT/${ctx.paths.localSkillRoot}/browse/dist/browse"
-[ -z "$B" ] && B="$HOME${ctx.paths.browseDir.replace(/^~/, '')}/browse"
-if [ -x "$B" ]; then
+[ -n "$_ROOT" ] && B="$(_find_bin "$_ROOT/${ctx.paths.localSkillRoot}/browse/dist/browse")"
+[ -z "$B" ] && B="$(_find_bin "$HOME${ctx.paths.browseDir.replace(/^~/, '')}/browse")"
+if [ -n "$B" ]; then
   echo "BROWSE_READY: $B"
 else
   echo "BROWSE_NOT_AVAILABLE (will use 'open' to view comparison boards)"
@@ -835,10 +837,11 @@ export function generateDesignMockup(ctx: TemplateContext): string {
 
 \`\`\`bash
 _ROOT=$(git rev-parse --show-toplevel 2>/dev/null)
+_find_bin() { local b="$1"; [ -x "\${b}.exe" ] && echo "\${b}.exe" && return; [ -x "\${b}" ] && echo "\${b}"; }
 D=""
-[ -n "$_ROOT" ] && [ -x "$_ROOT/${ctx.paths.localSkillRoot}/design/dist/design" ] && D="$_ROOT/${ctx.paths.localSkillRoot}/design/dist/design"
-[ -z "$D" ] && D="$HOME${ctx.paths.designDir.replace(/^~/, '')}/design"
-[ -x "$D" ] && echo "DESIGN_READY" || echo "DESIGN_NOT_AVAILABLE"
+[ -n "$_ROOT" ] && D="$(_find_bin "$_ROOT/${ctx.paths.localSkillRoot}/design/dist/design")"
+[ -z "$D" ] && D="$(_find_bin "$HOME${ctx.paths.designDir.replace(/^~/, '')}/design")"
+[ -n "$D" ] && echo "DESIGN_READY" || echo "DESIGN_NOT_AVAILABLE"
 \`\`\`
 
 **If \`DESIGN_NOT_AVAILABLE\`:** Fall back to the HTML wireframe approach below
