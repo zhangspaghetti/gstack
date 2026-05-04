@@ -1,5 +1,75 @@
 # Changelog
 
+## [1.26.2.0] - 2026-05-03
+
+## **`/plan-eng-review` always asks. Never silently writes findings to your plan first.**
+
+Plan-mode review skills now have a hard STOP gate before any AskUserQuestion. The bug
+this closes: a `/plan-eng-review` session would do Step 0 scope challenge, find real
+issues, write the findings into the plan file as prose, then call `ExitPlanMode` —
+never invoking AskUserQuestion. The user only saw "ready to execute" with the model's
+opinions already baked in. The tool to surface the question existed, the prompt
+told the model to use it, and the model still routed around it.
+
+Five sites in `plan-eng-review/SKILL.md.tmpl` now use the office-hours `b512be71`
+pattern verbatim: "the AskUserQuestion call is a tool_use, not prose — call the
+tool directly," named blockers ("do not edit the plan file, do not call
+ExitPlanMode"), and an anti-rationalization clause ("loading the schema via
+ToolSearch and writing the recommendation as chat prose is the failure mode this
+gate exists to prevent"). The four review-section gates (Architecture, Code
+Quality, Test, Performance) and the Step 0 complexity-check trigger all use the
+same language.
+
+### What you can now do
+
+- **Trust that any plan-* review skill that produces a plan file ends with the review report.** All four plan-mode E2E tests (`plan-eng`, `plan-ceo`, `plan-design`, `plan-devex`) now assert `## GSTACK REVIEW REPORT` is the last `## ` section of the plan file whenever one was written. The `{{PLAN_FILE_REVIEW_REPORT}}` resolver mandated this contract; nothing tested it until now.
+- **Catch the "writes findings to plan as prose before asking" failure mode.** New `wrote_findings_before_asking` classifier outcome fires when a `Write`/`Edit` to `.claude/plans/*` precedes any AskUserQuestion render in the session window. Opt-in via `strictPlanWrites: true` so existing tests where zero-findings → write plan → plan_ready stays legitimate.
+- **Run `plan-design-review-plan-mode` on PR CI again.** The touchfiles entry was duplicated — `plan-design-review-plan-mode` appeared at line 94 (gate, full deps) and line 243 (smaller deps). JS object literals: later wins. The effective tier was `periodic`, not `gate`. Three of four plan-mode siblings ran on every PR; design didn't.
+
+### Itemized changes
+
+#### Added
+
+- `runPlanSkillObservation`'s `initialPlanContent?: string` option. Pre-pumps a user message containing the seeded plan before invoking the skill, with a 3s gap so the message renders before the slash command.
+- `ClassifyResult` outcome `wrote_findings_before_asking` with companion `strictPlanWrites?` opt on `classifyVisible`. Six new unit tests in `claude-pty-runner.unit.test.ts` cover before/after-AUQ ordering plus the strict-off legacy path.
+- Shared test helper `assertReportAtBottomIfPlanWritten(obs)` in `claude-pty-runner.ts`. Wraps the existing `assertReviewReportAtBottom(content)` and gates on `obs.planFile` (artifact existing), so the assertion fires under `'asked'` and `'plan_ready'` both — wherever a plan file was actually written.
+- New seeded-plan test case in `skill-e2e-plan-eng-plan-mode.test.ts`: `STOP gate fires when seeded plan forces Step 0 findings`. Combines `initialPlanContent` + `--disallowedTools AskUserQuestion` to force the Conductor MCP-variant path through `mcp__*__AskUserQuestion`.
+
+#### Changed
+
+- `plan-eng-review/SKILL.md.tmpl` lines 116, 139, 152, 160, 169 ported from soft "STOP." prose to the office-hours pattern. Adds tool_use reminder, names blocked next steps explicitly, anti-rationalization clause.
+- `runPlanSkillObservation` now captures `obs.planFile` on every classifier outcome (was: only `'plan_ready'`). Catches the case where the skill wrote a plan partway through then paused on a question.
+
+#### Fixed
+
+- `test/helpers/touchfiles.ts` duplicate `plan-design-review-plan-mode` keys deleted (line 243 in `E2E_TOUCHFILES`, line 524 in `E2E_TIERS`). Effective tier is now `gate` again, matching the other three siblings.
+- `scripts/resolvers/review.ts` added to all four plan-mode-test touchfiles entries so changes to the `{{PLAN_FILE_REVIEW_REPORT}}` resolver text trigger all four sibling tests in `bun run eval:select`.
+
+#### For contributors
+
+- 6 new classifier unit tests in `test/helpers/claude-pty-runner.unit.test.ts` (70 → 76).
+- New `initialPlanContent?: string` option on `runPlanSkillObservation` for seeding a draft plan into a test run before invoking the skill. Lets STOP-gate regression tests pre-pump guaranteed-finding-triggering complexity (8+ files, custom-vs-builtin smell) so the skill has something concrete to react to.
+
+## [1.26.1.0] - 2026-05-03
+
+## **`gstack-gbrain-sync` ships host-agnostic. Curated artifacts push from Claude Code, Codex CLI, or a dev workspace — same orchestrator, same install, same result.**
+
+The orchestrator resolves its sibling `gstack-brain-sync` binary via `import.meta.dir`, matching the pattern already in `runMemoryIngest`. Path resolution stays anchored to where the script actually lives, not to a hardcoded host install root, so the curated-git-push stage runs end-to-end on every host gstack supports.
+
+### What you can now do
+
+- **Run `gstack-gbrain-sync` from any host install and watch curated artifacts land in the remote.** End-to-end smoke from a Conductor workspace: `bun run bin/gstack-gbrain-sync.ts --incremental --no-code --no-memory --quiet` returns `{"name": "brain-sync", "ran": true, "ok": true, "summary": "curated artifacts pushed"}`. The stage runs on Codex CLI installs and dev checkouts the same way it runs under Claude Code.
+
+### Changed
+
+- `runBrainSyncPush` (`bin/gstack-gbrain-sync.ts:222`) resolves the curated-push binary as a sibling of the running script. One line, single source of truth: `join(import.meta.dir, "gstack-brain-sync")`.
+
+### For contributors
+
+- New regression test in `test/gstack-gbrain-sync.test.ts` pins sibling-resolution behavior so future refactors can't drift the orchestrator back to a host-coupled path.
+- `plan-review` preamble byte ratchet bumped from 33 KB to 34 KB to honor the gbrain-sync block and AskUserQuestion recommendation pattern that shipped in v1.25.1.0/v1.26.0.0. The test's own comment authorizes this exact kind of intentional-growth ratchet bump.
+- `claude-ship-SKILL.md` and `factory-ship-SKILL.md` golden fixtures regenerated against the live `/ship` template (canonical `Recommendation:` line from v1.25.1.0 now reflected in the goldens).
+
 ## [1.26.0.0] - 2026-05-02
 
 ## **Your coding agent now remembers everything. Every gstack skill auto-loads what you actually did.**
