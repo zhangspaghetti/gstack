@@ -39,7 +39,9 @@ async function generateVariant(
   sizeOverride?: string,
 ): Promise<{ path: string; success: boolean; error?: string }> {
   const maxRetries = 3;
+  const MAX_RETRY_AFTER_MS = 60_000; // cap honored Retry-After to bound stalls
   let lastError = "";
+  let skipLeadingDelay = false;
 
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     if (attempt > 0) {
@@ -47,6 +49,7 @@ async function generateVariant(
       console.error(`  Rate limited, retrying in ${delay / 1000}s...`);
       await new Promise(r => setTimeout(r, delay));
     }
+    skipLeadingDelay = false;
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 120_000);

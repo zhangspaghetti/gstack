@@ -52,7 +52,8 @@ async function generateMockup(brief: { name: string; prompt: string }) {
     clearTimeout(timeout);
 
     const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-    const outputPath = path.join(OUTPUT_DIR, `${brief.name}.png`);
+    const safeName = brief.name.replace(/[^a-zA-Z0-9_-]/g, "_");
+    const outputPath = OUTPUT_DIR + "/" + safeName + ".png";
     const imageBuffer = Buffer.from(imageData, "base64");
     fs.writeFileSync(outputPath, imageBuffer);
 
@@ -79,7 +80,7 @@ async function main() {
       const resultPath = await generateMockup(brief);
       results.push({ name: brief.name, path: resultPath });
     } catch (err) {
-      console.error(`ERROR generating ${brief.name}:`, err);
+      console.error("ERROR generating:", brief.name, err);
       results.push({ name: brief.name, path: null });
     }
   }
@@ -94,7 +95,7 @@ async function main() {
   console.log(`${succeeded.length}/${results.length} generated successfully`);
 
   if (failed.length > 0) {
-    console.log(`Failed: ${failed.map(f => f.name).join(", ")}`);
+    console.log("Failed:", failed.map(f => f.name).join(", "));
   }
 
   if (succeeded.length > 0) {
