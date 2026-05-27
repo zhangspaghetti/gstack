@@ -47,7 +47,7 @@ export async function evolve(options: EvolveOptions): Promise<void> {
   ].join("\n");
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 120_000);
+  const timeout = setTimeout(() => controller.abort(), 240_000);
 
   try {
     const { imageData } = await callImageGenApi(imageConfig, evolvedPrompt, { signal: controller.signal });

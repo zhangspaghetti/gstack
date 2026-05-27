@@ -4,7 +4,7 @@ dist/
 browse/dist/
 design/dist/
 make-pdf/dist/
-bin/gstack-global-discover
+bin/gstack-global-discover*
 .gstack/
 .claude/skills/
 .claude/scheduled_tasks.lock
@@ -22,6 +22,8 @@ bin/gstack-global-discover
 .gsd/
 .gbrain-source
 .context/
+.copilot/
+.gsd/
 extension/.auth.json
 # xterm assets are vendored from npm at build time; not source-of-truth.
 extension/lib/xterm.js

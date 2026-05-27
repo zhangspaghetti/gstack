@@ -66,6 +66,7 @@
 
 import fs from "fs";
 import path from "path";
+import { resolveApiKeyInfo } from "./auth";
 
 /**
  * Return the correct MIME type for an image file based on its extension.
@@ -160,12 +161,13 @@ export function getImageGenConfig(): ImageGenConfig {
   const provider = (process.env.DESIGN_IMAGE_PROVIDER as "dashscope" | "openai" | undefined)
     ?? file.imageGen?.provider
     ?? "dashscope";
+  const openAiResolution = provider === "openai" ? resolveApiKeyInfo() : null;
 
   const apiKey =
     process.env.DESIGN_IMAGE_API_KEY
     ?? process.env.DASHSCOPE_API_KEY
-    ?? (provider === "openai" ? process.env.GSTACK_OPENAI_API_KEY : undefined)
     ?? file.imageGen?.apiKey
+    ?? openAiResolution?.key
     ?? "";
 
   if (!apiKey) {
@@ -178,6 +180,10 @@ export function getImageGenConfig(): ImageGenConfig {
     }
     console.error(`  2. Add to ${CONFIG_PATH}: { "imageGen": { "apiKey": "sk-..." } }`);
     process.exit(1);
+  }
+
+  if (openAiResolution?.warning) {
+    console.error(openAiResolution.warning);
   }
 
   const defaultBaseUrl = provider === "openai"
@@ -221,11 +227,12 @@ export function getVisionConfig(): VisionConfig {
   const visionProvider = (process.env.DESIGN_VISION_PROVIDER as "openai" | "qwen" | "mimo" | undefined)
     ?? file.vision?.visionProvider
     ?? "openai";
+  const openAiResolution = visionProvider === "openai" ? resolveApiKeyInfo() : null;
   const apiKey =
     process.env.DESIGN_VISION_API_KEY
     ?? process.env.DASHSCOPE_API_KEY
     ?? file.vision?.apiKey
-    ?? (visionProvider === "openai" ? process.env.GSTACK_OPENAI_API_KEY : undefined)
+    ?? openAiResolution?.key
     ?? "";
 
   if (!apiKey) {
@@ -234,6 +241,10 @@ export function getVisionConfig(): VisionConfig {
     console.error("  1. export DASHSCOPE_API_KEY=sk-...");
     console.error(`  2. Add to ${CONFIG_PATH}: { "vision": { "apiKey": "sk-..." } }`);
     process.exit(1);
+  }
+
+  if (openAiResolution?.warning) {
+    console.error(openAiResolution.warning);
   }
 
   return {
@@ -278,13 +289,20 @@ export async function callImageGenApi(
       body: JSON.stringify({
         model: config.model,
         input: prompt,
-        tools: [{ type: "image_generation", size, quality: opts?.quality ?? "high" }],
+        tools: [{ type: "image_generation", model: "gpt-image-2", size, quality: opts?.quality ?? "high" }],
       }),
       signal: opts?.signal,
     });
 
     if (!response.ok) {
       const error = await response.text();
+      if (response.status === 403 && error.includes("organization must be verified")) {
+        throw new Error(
+          "OpenAI organization verification required.\n"
+          + "Go to https://platform.openai.com/settings/organization to verify.\n"
+          + "After verification, wait up to 15 minutes for access to propagate.",
+        );
+      }
       throw new Error(`API error (${response.status}): ${error.slice(0, 300)}`);
     }
 
