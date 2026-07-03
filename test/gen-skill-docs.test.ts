@@ -108,7 +108,7 @@ const CLAUDE_GENERATED_SKILLS = ALL_SKILLS.filter(skill => !CLAUDE_SKIPPED_SKILL
 
 describe('gen-skill-docs', () => {
   test('generated SKILL.md contains all command categories', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(ROOT, 'browse', 'SKILL.md'), 'utf-8');
     const categories = new Set(Object.values(COMMAND_DESCRIPTIONS).map(d => d.category));
     for (const cat of categories) {
       expect(content).toContain(`### ${cat}`);
@@ -116,7 +116,7 @@ describe('gen-skill-docs', () => {
   });
 
   test('generated SKILL.md contains all commands', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(ROOT, 'browse', 'SKILL.md'), 'utf-8');
     for (const [cmd, meta] of Object.entries(COMMAND_DESCRIPTIONS)) {
       const display = meta.usage || cmd;
       expect(content).toContain(display);
@@ -124,7 +124,7 @@ describe('gen-skill-docs', () => {
   });
 
   test('command table is sorted alphabetically within categories', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(ROOT, 'browse', 'SKILL.md'), 'utf-8');
     // Extract command names from the Navigation section as a test
     const navSection = content.match(/### Navigation\n\|.*\n\|.*\n([\s\S]*?)(?=\n###|\n## )/);
     expect(navSection).not.toBeNull();
@@ -149,7 +149,7 @@ describe('gen-skill-docs', () => {
   });
 
   test('snapshot flags section contains all flags', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(ROOT, 'browse', 'SKILL.md'), 'utf-8');
     for (const flag of SNAPSHOT_FLAGS) {
       expect(content).toContain(flag.short);
       expect(content).toContain(flag.description);
@@ -284,10 +284,12 @@ describe('gen-skill-docs', () => {
   });
 
   test('templates contain placeholders', () => {
+    // P2 (v1.2.0): the root template is a pure router — only {{PREAMBLE}}.
+    // The browse command/snapshot placeholders live in browse/SKILL.md.tmpl now.
     const rootTmpl = fs.readFileSync(path.join(ROOT, 'SKILL.md.tmpl'), 'utf-8');
-    expect(rootTmpl).toContain('{{COMMAND_REFERENCE}}');
-    expect(rootTmpl).toContain('{{SNAPSHOT_FLAGS}}');
     expect(rootTmpl).toContain('{{PREAMBLE}}');
+    expect(rootTmpl).not.toContain('{{COMMAND_REFERENCE}}');
+    expect(rootTmpl).not.toContain('{{SNAPSHOT_FLAGS}}');
 
     const browseTmpl = fs.readFileSync(path.join(ROOT, 'browse', 'SKILL.md.tmpl'), 'utf-8');
     expect(browseTmpl).toContain('{{COMMAND_REFERENCE}}');
@@ -592,7 +594,7 @@ describe('GitLab support in generated skills', () => {
 describe('description quality evals', () => {
   // Regression: snapshot flags lost value hints (-d <N>, -s <sel>, -o <path>)
   test('snapshot flags with values include value hints in output', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
+    const content = fs.readFileSync(path.join(ROOT, 'browse', 'SKILL.md'), 'utf-8');
     for (const flag of SNAPSHOT_FLAGS) {
       if (flag.takesValue) {
         expect(flag.valueHint).toBeDefined();
@@ -659,11 +661,13 @@ describe('description quality evals', () => {
 
   // Guard: generated output uses → not ->
   test('generated SKILL.md uses unicode arrows', () => {
-    const content = fs.readFileSync(path.join(ROOT, 'SKILL.md'), 'utf-8');
-    // Check the Tips section specifically (where we regressed -> from →)
-    const tipsSection = content.slice(content.indexOf('## Tips'));
-    expect(tipsSection).toContain('→');
-    expect(tipsSection).not.toContain('->');
+    // P2 (v1.2.0): the browse body moved out of the top-level router into
+    // browse/SKILL.md. Guard arrow style on the browse body (sliced from its
+    // H1 so the auto-generated `-->` header comments are excluded).
+    const content = fs.readFileSync(path.join(ROOT, 'browse', 'SKILL.md'), 'utf-8');
+    const body = content.slice(content.indexOf('# browse: QA Testing'));
+    expect(body).toContain('→');
+    expect(body).not.toContain('->');
   });
 });
 
@@ -2305,6 +2309,15 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('create_agents_sidecar "$SOURCE_GSTACK_DIR"');
   });
 
+  test('gbrain detection refreshes Codex skills with respect-detection enabled', () => {
+    const gbrainSection = setupContent.slice(
+      setupContent.indexOf('gbrain detected — regenerating Claude SKILL.md'),
+      setupContent.indexOf('# 11. Plan-tune cathedral hook install')
+    );
+    expect(gbrainSection).toContain('bun_cmd run gen:skill-docs --host codex --respect-detection');
+    expect(gbrainSection).toContain('link_codex_skill_dirs "$SOURCE_GSTACK_DIR" "$CODEX_SKILLS"');
+  });
+
   test('link_codex_skill_dirs reads from .agents/skills/', () => {
     // The Codex link function must reference .agents/skills for generated Codex skills
     const fnStart = setupContent.indexOf('link_codex_skill_dirs()');
@@ -2312,6 +2325,14 @@ describe('setup script validation', () => {
     const fnBody = setupContent.slice(fnStart, fnEnd);
     expect(fnBody).toContain('.agents/skills');
     expect(fnBody).toContain('gstack*');
+  });
+
+  test('link_codex_skill_dirs refreshes existing skill targets before linking', () => {
+    const fnStart = setupContent.indexOf('link_codex_skill_dirs()');
+    const fnEnd = setupContent.indexOf('}', setupContent.indexOf('linked[@]}', fnStart));
+    const fnBody = setupContent.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('rm -rf "$target"');
+    expect(fnBody).toContain('Always refresh existing targets');
   });
 
   test('link_claude_skill_dirs creates real directories with absolute SKILL.md symlinks', () => {
@@ -3379,5 +3400,64 @@ describe('EXIT PLAN MODE GATE placement', () => {
     const codex = fs.readFileSync(path.join(ROOT, 'codex', 'SKILL.md'), 'utf-8');
     expect(codex).toContain('## EXIT PLAN MODE GATE (BLOCKING)');
     expect(codex).toContain('Failing this gate and calling ExitPlanMode anyway is a contract violation');
+  });
+});
+
+describe('GSTACK REVIEW REPORT mandatory unresolved-decisions status', () => {
+  // Report text rides in PLAN_FILE_REVIEW_REPORT → every report consumer gets it.
+  // devex-review is a report consumer but NOT a gate consumer, so the two target
+  // sets differ (CP5/CX5). Regression guard: a future token-cut that drops the
+  // unresolved-status line again fails here. See plan-flag-unresolved-issues.
+  const REPORT_CONSUMERS = [
+    'plan-ceo-review',
+    'plan-eng-review',
+    'plan-design-review',
+    'plan-devex-review',
+    'codex',
+    'devex-review',
+  ];
+  // Gate text rides in EXIT_PLAN_MODE_GATE (lives in SKILL.md, not sections).
+  const GATE_SKILLS = [
+    'plan-ceo-review',
+    'plan-eng-review',
+    'plan-design-review',
+    'plan-devex-review',
+    'codex',
+  ];
+
+  for (const skill of REPORT_CONSUMERS) {
+    test(`${skill}: report mandates the unresolved-decisions status as final content`, () => {
+      const content = readSkillUnion(skill);
+      expect(content).toContain('NO UNRESOLVED DECISIONS');
+      // The "never omit / always final" contract must be present, not just the phrase.
+      expect(content).toContain('Unresolved-decisions status (MANDATORY');
+      expect(content).toMatch(/never omitted/);
+      // \s+ tolerates prose line-wraps within "final non-whitespace line".
+      expect(content).toMatch(/final\s+non-whitespace\s+line/);
+    });
+  }
+
+  for (const skill of GATE_SKILLS) {
+    test(`${skill}: exit gate blocks unless the unresolved status is the final line`, () => {
+      const md = fs.readFileSync(path.join(ROOT, skill, 'SKILL.md'), 'utf-8');
+      // Gate check #4 — present, sentinel named, and explicitly blocking (no escape).
+      expect(md).toContain('NO UNRESOLVED DECISIONS');
+      expect(md).toContain('FINAL non-whitespace line is the unresolved-decisions');
+      expect(md).toContain('FAILS the gate');
+    });
+  }
+
+  test('scripts/resolvers/review.ts source carries the mandatory block + blocking gate', () => {
+    const src = fs.readFileSync(path.join(ROOT, 'scripts', 'resolvers', 'review.ts'), 'utf-8');
+    // Report resolver: mandatory, never-omitted, exact sentinel, anti-double-count algorithm.
+    expect(src).toContain('Unresolved-decisions status (MANDATORY');
+    expect(src).toContain('NO UNRESOLVED DECISIONS');
+    expect(src).toContain('avoids double-counting');
+    expect(src).toContain('DROP the current skill');
+    // Gate resolver: the blocking final-line check with no "if applicable" escape.
+    expect(src).toContain('FINAL non-whitespace line is the unresolved-decisions');
+    expect(src).toContain('FAILS the gate');
+    // The old soft wording must be gone from the gate.
+    expect(src).not.toContain('absorbs CODEX / CROSS-MODEL / UNRESOLVED lines if applicable');
   });
 });
