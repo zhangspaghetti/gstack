@@ -727,11 +727,14 @@ link_codex_skill_dirs() {
       # symlink that Step 5 already pointed at the repo root.
       [ "$skill_name" = "gstack" ] && continue
       target="$skills_dir/$skill_name"
-      # Create or update symlink
-      if [ -L "$target" ] || [ ! -e "$target" ]; then
-        _link_or_copy "$skill_dir" "$target"
-        linked+=("$skill_name")
+      # Always refresh existing targets: Codex installs on Windows are real
+      # directories/files, and a no-op skip would leave stale skill content in
+      # place after rerunning ./setup.
+      if [ -e "$target" ] || [ -L "$target" ]; then
+        rm -rf "$target"
       fi
+      _link_or_copy "$skill_dir" "$target"
+      linked+=("$skill_name")
     fi
   done
   if [ ${#linked[@]} -gt 0 ]; then
@@ -1319,6 +1322,14 @@ if [ -x "$DETECT_BIN" ]; then
           cd "$SOURCE_GSTACK_DIR"
           bun_cmd run gen:skill-docs:user --host claude 2>&1 | tail -3
         ) || log "  warning: gen:skill-docs:user failed — run 'bun run gen:skill-docs:user' manually if you want brain-aware blocks"
+        if [ "$INSTALL_CODEX" -eq 1 ]; then
+          log "gbrain detected — refreshing Codex skills with brain-aware blocks..."
+          (
+            cd "$SOURCE_GSTACK_DIR"
+            bun_cmd run gen:skill-docs --host codex --respect-detection
+            link_codex_skill_dirs "$SOURCE_GSTACK_DIR" "$CODEX_SKILLS"
+          ) || log "  warning: Codex refresh after gbrain detection failed — run 'bun run gen:skill-docs --host codex --respect-detection' manually"
+        fi
       fi
     else
       log "gbrain not detected — brain-aware blocks suppressed in planning-skill SKILL.md files (zero token overhead)."

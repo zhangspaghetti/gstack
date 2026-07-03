@@ -2309,6 +2309,15 @@ describe('setup script validation', () => {
     expect(setupContent).toContain('create_agents_sidecar "$SOURCE_GSTACK_DIR"');
   });
 
+  test('gbrain detection refreshes Codex skills with respect-detection enabled', () => {
+    const gbrainSection = setupContent.slice(
+      setupContent.indexOf('gbrain detected — regenerating Claude SKILL.md'),
+      setupContent.indexOf('# 11. Plan-tune cathedral hook install')
+    );
+    expect(gbrainSection).toContain('bun_cmd run gen:skill-docs --host codex --respect-detection');
+    expect(gbrainSection).toContain('link_codex_skill_dirs "$SOURCE_GSTACK_DIR" "$CODEX_SKILLS"');
+  });
+
   test('link_codex_skill_dirs reads from .agents/skills/', () => {
     // The Codex link function must reference .agents/skills for generated Codex skills
     const fnStart = setupContent.indexOf('link_codex_skill_dirs()');
@@ -2316,6 +2325,14 @@ describe('setup script validation', () => {
     const fnBody = setupContent.slice(fnStart, fnEnd);
     expect(fnBody).toContain('.agents/skills');
     expect(fnBody).toContain('gstack*');
+  });
+
+  test('link_codex_skill_dirs refreshes existing skill targets before linking', () => {
+    const fnStart = setupContent.indexOf('link_codex_skill_dirs()');
+    const fnEnd = setupContent.indexOf('}', setupContent.indexOf('linked[@]}', fnStart));
+    const fnBody = setupContent.slice(fnStart, fnEnd);
+    expect(fnBody).toContain('rm -rf "$target"');
+    expect(fnBody).toContain('Always refresh existing targets');
   });
 
   test('link_claude_skill_dirs creates real directories with absolute SKILL.md symlinks', () => {
